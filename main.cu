@@ -27,14 +27,14 @@ int main() {
     }
     C = A + B;
     cout << "The sum is: " << endl;
-    cout << C << endl;
+    cout << C << "\n\n";
     NDArray<float> D = C[{Slice(0, 3, 2), Slice(0, 3, 2)}]; // view colturi
-    cout << D << endl;
+    cout << D << "\n\n";
     NDArray<float> ZEROS({2, 2});
     ZEROS = 0;
     D = ZEROS;
-    cout << D << endl;
-    cout << C << endl;
+    cout << D << "\n\n";
+    cout << C << "\n\n";
     return 0;
 
 }

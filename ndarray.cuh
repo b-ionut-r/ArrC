@@ -11,19 +11,9 @@
 #include <string>
 #include "kernels.cu"
 #include "slices.cpp"
+#include "utils.cu"
 using namespace std;
 
-///
-inline cudaDeviceProp getDeviceProp() {
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    return prop;
-}
-
-inline cudaDeviceProp dev_prop = getDeviceProp();
-inline int N_BLOCKS = dev_prop.multiProcessorCount * 4;
-inline int N_THREADS = 256;
-///
 
 /// FORWARD DECLARATIONS FOR OSTREAM
 template <typename dtype>
@@ -35,29 +25,30 @@ ostream& operator<<(ostream &os, const NDArray<dtype> &arr);
 template <typename dtype>
 class NDArray {
 protected:
-
     dtype *data;
     vector<int> shape; int ndim; int size;
     vector<int> strides;
     int itemBytes;
     int offset; bool ownsData;
-
-    // Helper to allocate device memory for strides/shape
-    void allocateDeviceArrays(int** dStrides, int** dShape) const {
-        cudaMalloc(dStrides, ndim * sizeof(int));
-        cudaMalloc(dShape, ndim * sizeof(int));
-        cudaMemcpy(*dStrides, strides.data(), ndim * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(*dShape, shape.data(), ndim * sizeof(int), cudaMemcpyHostToDevice);
-    }
-
+    int N_BLOCKS; int N_THREADS = 256;
+    int id;
+    static int idGenerator;
+    // Helpers
+    void allocateDeviceMetadata(int** dStrides=nullptr,
+                                int** dShape=nullptr) const;
+    template <typename Op>
+    void executeElementWise(Op op, const NDArray *result,
+                            const NDArray *other = nullptr) const;
 public:
-
     /// CONSTRUCTORS and DESTRUCTORS
     NDArray() = default;
-    NDArray(const vector<int> &shape);
+    NDArray(const vector<int> &shape); // alocator constructor
     void _computeStrides();
     NDArray(dtype *data, const vector<int> &shape, const int &offset,
-            const vector<int> &strides);
+            const vector<int> &strides); // viewer constructor
+    NDArray(const NDArray<dtype> &other); // copy constructor
+    NDArray(NDArray<dtype> &&other) noexcept; /* move constructor
+    for returned rvalues views of ndarray. */
     ~NDArray();
 
     /// GETTERS and SETTERS (inline)
@@ -91,9 +82,12 @@ public:
     friend ostream& operator<< <>(ostream &os, const NDArray<dtype> &arr);
 };
 
+template<typename dtype>
+int NDArray<dtype>::idGenerator = 0; // static variable is initialized outside class
 
 
 /// DEFINITIONS FOR TEMPLATES ALSO NEED TO BE IN HEADER ///
+
 template<typename dtype>
 NDArray<dtype>::NDArray(const vector<int> &shape):
     shape(shape),
@@ -101,11 +95,14 @@ NDArray<dtype>::NDArray(const vector<int> &shape):
     strides(shape.size()),
     itemBytes(sizeof(dtype)),
     offset(0),
-    ownsData(true) {
+    ownsData(true),
+    id(++idGenerator)
+{
     size = shape[0];
     for (int i = 1; i < ndim; i++) {
         size *= shape[i];
     }
+    N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
     _computeStrides();
     cudaMallocManaged(&data, size * itemBytes);
 }
@@ -127,12 +124,49 @@ NDArray<dtype>::NDArray(dtype *data, const vector<int> &shape, const int &offset
     strides(strides),
     itemBytes(sizeof(dtype)),
     offset(offset),
-    ownsData(false) {
+    ownsData(false),
+    id(++idGenerator)
+{
     size = shape[0];
     for (int i = 1; i < ndim; i++) {
         size *= shape[i];
     }
+    N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
 };
+
+
+template<typename dtype>
+NDArray<dtype>::NDArray(const NDArray<dtype> &other):
+    shape(other.shape), ndim(other.ndim), size(other.size),
+    strides(other.ndim), itemBytes(sizeof(dtype)),
+    offset(0), ownsData(true), id(++idGenerator)
+{
+    N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
+    _computeStrides();
+    cudaMallocManaged(&data, size * itemBytes);
+    if (other.isContiguous() && other.offset == 0) {
+        cudaMemcpy(data, other.data, size * itemBytes, cudaMemcpyDeviceToDevice);
+    } else {
+        NDArray<dtype> temp(data, shape, 0, strides); // temp view
+        temp.executeElementWise(AssignOp<dtype>{}, &temp, &other);
+        temp.ownsData = false;
+    }
+    cudaDeviceSynchronize();
+}
+
+
+template<typename dtype>
+NDArray<dtype>::NDArray(NDArray<dtype> &&other) noexcept:
+    data(other.data), shape(move(other.shape)),
+    ndim(other.ndim), size(other.size),
+    strides(move(other.strides)), itemBytes(other.itemBytes),
+    offset(other.offset), ownsData(other.ownsData),
+    N_BLOCKS(other.N_BLOCKS), id(other.id) // "steals" id of rvalue
+{
+    other.data = nullptr;
+    other.ownsData = false;
+}
+
 
 template<typename dtype>
 NDArray<dtype>::~NDArray() {
@@ -189,23 +223,63 @@ NDArray<dtype> NDArray<dtype>::operator[](vector<Slice> slices) {
         new_strides[i] = step * strides[i];
         new_shape[i] = slices[i].size();
     }
-    NDArray<dtype> result(data, new_shape, ptr_offset, new_strides);
+    NDArray<dtype> result(data, new_shape, ptr_offset, new_strides); // view
     return result;
 }
 
+
+
 template <typename dtype>
-NDArray<dtype>& NDArray<dtype>::operator=(const dtype &value) {
-    if (isContiguous()) {
-        setConstant<<<N_BLOCKS, N_THREADS>>>(data, offset, value, size);
+template <typename Op>
+void NDArray<dtype>::executeElementWise(
+    Op op,
+    const NDArray<dtype> *result,
+    const NDArray<dtype> *other
+    ) const {
+    bool allContig = isContiguous();
+    if (other) {
+        allContig = allContig && other->isContiguous();
+    }
+    if (allContig) {
+        elementWiseKernelContiguous<<<N_BLOCKS, N_THREADS>>>(
+            result->data, result->offset, result->size,
+            op,
+            this->data, this->offset,
+            other ? other->data : nullptr, other ? other->offset : 0
+        );
+        cudaDeviceSynchronize();
     } else {
-        int *dStrides, *dShape;
-        allocateDeviceArrays(&dStrides, &dShape);
-        setConstantStrided<<<N_BLOCKS, N_THREADS>>>(
-            data, offset, dStrides, dShape, ndim, value, size);
-        cudaFree(dStrides);
-        cudaFree(dShape);
+        int *dResultStrides, *dStrides, *dOtherStrides = nullptr, *dShape;
+        result->allocateDeviceMetadata(&dResultStrides, &dShape);
+        allocateDeviceMetadata(&dStrides, nullptr);
+        if (other) {
+            other->allocateDeviceMetadata(&dOtherStrides, nullptr);
+        }
+        elementWiseKernelStrided<<<N_BLOCKS, N_THREADS>>>(
+            result->data, result->offset, dResultStrides,
+            result->size, result->ndim, dShape,
+            op,
+            this->data, this->offset, dStrides,
+            other ? other->data : nullptr, other ? other->offset : 0, dOtherStrides
+        );
+        cudaDeviceSynchronize();
+        if (other) {
+            cudaFreeMulti({dResultStrides, dStrides, dOtherStrides, dShape});
+        } else {
+            cudaFreeMulti({dResultStrides, dStrides, dShape});
+        }
+    }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw runtime_error(string("CUDA Error: ") + cudaGetErrorString(err));
     }
     cudaDeviceSynchronize();
+}
+
+
+template <typename dtype>
+NDArray<dtype>& NDArray<dtype>::operator=(const dtype &value) {
+    executeElementWise(SetConstantOp<dtype>{value}, this, nullptr); // inplace execution
     return *this;
 }
 
@@ -215,29 +289,15 @@ NDArray<dtype>& NDArray<dtype>::operator=(const NDArray<dtype> &other) {
         throw runtime_error("Cannot assign array of shape " + to_string(other.shape[0]) +
         " to array of shape " + to_string(shape[0]));
     }
-
     if (isContiguous() && other.isContiguous() && offset == 0 && other.offset == 0) {
         cudaMemcpy(data, other.data, size * itemBytes, cudaMemcpyDeviceToDevice);
         cudaDeviceSynchronize();
         return *this;
     }
-
-    int *dStrides, *dOtherStrides, *dShape;
-    allocateDeviceArrays(&dStrides, &dShape);
-    cudaMalloc(&dOtherStrides, other.ndim * sizeof(int));
-    cudaMemcpy(dOtherStrides, other.strides.data(), other.ndim * sizeof(int), cudaMemcpyHostToDevice);
-
-    assign<<<N_BLOCKS, N_THREADS>>>(
-        data, offset, dStrides,
-        other.data, other.offset, dOtherStrides,
-        dShape, ndim, size
-    );
-    cudaDeviceSynchronize();
-    cudaFree(dStrides);
-    cudaFree(dOtherStrides);
-    cudaFree(dShape);
+    executeElementWise(AssignOp<dtype>{}, this,  &other); // inplace execution
     return *this;
 }
+
 
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator+(const NDArray<dtype> &other) const {
@@ -246,62 +306,14 @@ NDArray<dtype> NDArray<dtype>::operator+(const NDArray<dtype> &other) const {
                             "arrays with different shapes.");
     }
     NDArray<dtype> result(shape);
-
-    if (isContiguous() && other.isContiguous()) {
-        affineAdd<<<N_BLOCKS, N_THREADS>>>(
-            result.data, result.offset,
-            data, offset,
-            other.data, other.offset,
-            size);
-    } else {
-        int *dResultStrides, *dStrides, *dOtherStrides, *dShape;
-        result.allocateDeviceArrays(&dResultStrides, &dShape);
-        allocateDeviceArrays(&dStrides, &dShape);  // dShape already allocated, just update dStrides
-        cudaFree(dShape);  // Free the duplicate
-        allocateDeviceArrays(&dStrides, &dShape);  // Reallocate both
-        cudaMalloc(&dOtherStrides, other.ndim * sizeof(int));
-        cudaMemcpy(dOtherStrides, other.strides.data(), other.ndim * sizeof(int), cudaMemcpyHostToDevice);
-
-        affineAddStrided<<<N_BLOCKS, N_THREADS>>>(
-            result.data, result.offset, dResultStrides,
-            data, offset, dStrides,
-            other.data, other.offset, dOtherStrides,
-            dShape, ndim, size);
-
-        cudaFree(dResultStrides);
-        cudaFree(dStrides);
-        cudaFree(dOtherStrides);
-        cudaFree(dShape);
-    }
-    cudaDeviceSynchronize();
+    executeElementWise(AffineAddOp<dtype>{1, 1}, &result, &other);
     return result;
 }
 
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator-() const {
     NDArray<dtype> result(shape);
-
-    if (isContiguous()) {
-        scalarMul<<<N_BLOCKS, N_THREADS>>>(
-            result.data, result.offset,
-            data, offset,
-            size, dtype(-1));
-    } else {
-        int *dResultStrides, *dStrides, *dShape;
-        result.allocateDeviceArrays(&dResultStrides, &dShape);
-        cudaFree(dShape);  // Free duplicate
-        allocateDeviceArrays(&dStrides, &dShape);
-
-        scalarMulStrided<<<N_BLOCKS, N_THREADS>>>(
-            result.data, result.offset, dResultStrides,
-            data, offset, dStrides,
-            dShape, ndim, size, dtype(-1));
-
-        cudaFree(dResultStrides);
-        cudaFree(dStrides);
-        cudaFree(dShape);
-    }
-    cudaDeviceSynchronize();
+    executeElementWise(ScalarMulOp<dtype>{-1}, &result, nullptr);
     return result;
 }
 
@@ -312,58 +324,74 @@ NDArray<dtype> NDArray<dtype>::operator-(const NDArray<dtype> &other) const {
                             "arrays with different shapes.");
     }
     NDArray<dtype> result(shape);
-
-    if (isContiguous() && other.isContiguous()) {
-        affineAdd<<<N_BLOCKS, N_THREADS>>>(
-            result.data, result.offset,
-            data, offset,
-            other.data, other.offset,
-            size, dtype(1), dtype(-1));
-    } else {
-        int *dResultStrides, *dStrides, *dOtherStrides, *dShape;
-        result.allocateDeviceArrays(&dResultStrides, &dShape);
-        cudaFree(dShape);
-        allocateDeviceArrays(&dStrides, &dShape);
-        cudaMalloc(&dOtherStrides, other.ndim * sizeof(int));
-        cudaMemcpy(dOtherStrides, other.strides.data(), other.ndim * sizeof(int), cudaMemcpyHostToDevice);
-
-        affineAddStrided<<<N_BLOCKS, N_THREADS>>>(
-            result.data, result.offset, dResultStrides,
-            data, offset, dStrides,
-            other.data, other.offset, dOtherStrides,
-            dShape, ndim, size, dtype(1), dtype(-1));
-
-        cudaFree(dResultStrides);
-        cudaFree(dStrides);
-        cudaFree(dOtherStrides);
-        cudaFree(dShape);
-    }
-    cudaDeviceSynchronize();
+    executeElementWise(AffineAddOp<dtype>{1, -1}, &result, &other);
     return result;
 }
 
+
 template <typename dtype>
 ostream& operator<<(ostream &os, const NDArray<dtype> &arr) {
-    os << "[";
+    if (arr.size == 0) {
+        os << "[]";
+        return os;
+    }
+    vector<int> multi_idx(arr.ndim);
     for (int i = 0; i < arr.size; i++) {
-        for (int j = 0; j < arr.ndim-1; j++) {
-            if (arr.strides[j] != 0 && i % arr.strides[j] == 0) {
-                os << "[";
+        int remaining = i;
+        for (int d = arr.ndim - 1; d >= 0; d--) {
+            multi_idx[d] = remaining % arr.shape[d];
+            remaining /= arr.shape[d];
+        }
+        if (i == 0) {
+            for(int d = 0; d < arr.ndim; ++d) os << "[";
+        }
+        else {
+            for (int d = 0; d < arr.ndim - 1; d++) {
+                if (multi_idx[d + 1] == 0) {
+                    if (d == arr.ndim - 2) os << endl;
+                    os << "[";
+                } else {
+                    break;
+                }
             }
         }
-        os << arr.data[arr.offset + i];
+        int data_idx = arr.offset;
+        for (int d = 0; d < arr.ndim; d++) {
+            data_idx += multi_idx[d] * arr.strides[d];
+        }
+        os << arr.data[data_idx];
         bool any_close = false;
-        for (int j = arr.ndim - 2; j >= 0; j--) {
-            if (arr.strides[j] != 0 && i % arr.strides[j] == arr.strides[j] - 1) {
+        for (int d = arr.ndim - 1; d >= 0; d--) {
+            if (multi_idx[d] == arr.shape[d] - 1) {
                 os << "]";
                 any_close = true;
+            } else {
+                break;
             }
         }
-        if (any_close && i!=arr.size-1) os << endl;
-        if (!any_close) os << ", ";
+        if (any_close && i != arr.size - 1) {
+        }
+        if (!any_close) {
+            os << ", ";
+        }
     }
-    os << "]";
     return os;
+}
+
+
+// Helper to allocate device memory for strides/shape
+template <typename dtype>
+void NDArray<dtype>::allocateDeviceMetadata(int** dStrides, int** dShape) const {
+    if (dStrides != nullptr) {
+        cudaMalloc(dStrides, ndim * sizeof(int));
+        cudaMemcpy(*dStrides, strides.data(),
+                ndim * sizeof(int), cudaMemcpyHostToDevice);
+    }
+    if (dShape != nullptr) {
+        cudaMalloc(dShape, ndim * sizeof(int));
+        cudaMemcpy(*dShape, shape.data(),
+            ndim * sizeof(int), cudaMemcpyHostToDevice);
+    }
 }
 
 #endif //ARRC_NDARRAY_H
