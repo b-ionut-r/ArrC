@@ -7,7 +7,9 @@ add_executable(ArrC
         kernels.cu
         slices.cpp
         ndarray.cuh
-        main.cu)
+        main.cu
+        exceptions.h
+)
 
 set_target_properties(ArrC PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON)

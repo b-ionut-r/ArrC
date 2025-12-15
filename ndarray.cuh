@@ -6,12 +6,12 @@
 #define ARRC_NDARRAY_H
 
 #include <iostream>
-#include <stdexcept>
 #include <vector>
 #include <string>
 #include "kernels.cu"
 #include "slices.cpp"
 #include "utils.cu"
+#include "exceptions.h"
 using namespace std;
 
 
@@ -20,6 +20,8 @@ template <typename dtype>
 class NDArray;
 template <typename dtype>
 ostream& operator<<(ostream &os, const NDArray<dtype> &arr);
+template <typename dtype>
+istream& operator>>(istream &is, NDArray<dtype> &arr);
 ///
 
 template <typename dtype>
@@ -32,7 +34,10 @@ protected:
     int offset; bool ownsData;
     int N_BLOCKS; int N_THREADS = 256;
     int id;
+    // Static members
     static int idGenerator;
+    static size_t totalAllocatedMemory; // GPU Memory
+    static size_t getTotalAllocatedMemory(){return totalAllocatedMemory;}
     // Helpers
     void allocateDeviceMetadata(int** dStrides=nullptr,
                                 int** dShape=nullptr) const;
@@ -60,7 +65,8 @@ public:
     vector<int> getStrides() const {return strides;}
     void setStrides(const vector <int> &new_strides) {
         if (strides.size() != new_strides.size()) {
-            throw runtime_error("Cannot set strides: new_strides.size() != strides.size()");
+            throw NDimMismatchException("New strides vector must have "
+                                        "same size as old strides vector.");
         }
         strides = new_strides;
     }
@@ -80,10 +86,13 @@ public:
     NDArray operator-() const;
     NDArray operator-(const NDArray &other) const;
     friend ostream& operator<< <>(ostream &os, const NDArray<dtype> &arr);
+    friend istream& operator>> <>(istream &is, NDArray<dtype> &arr);
 };
 
 template<typename dtype>
 int NDArray<dtype>::idGenerator = 0; // static variable is initialized outside class
+template<typename dtype>
+size_t NDArray<dtype>::totalAllocatedMemory = 0;
 
 
 /// DEFINITIONS FOR TEMPLATES ALSO NEED TO BE IN HEADER ///
@@ -105,6 +114,7 @@ NDArray<dtype>::NDArray(const vector<int> &shape):
     N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
     _computeStrides();
     cudaMallocManaged(&data, size * itemBytes);
+    totalAllocatedMemory += size * itemBytes;
 }
 
 template<typename dtype>
@@ -144,6 +154,7 @@ NDArray<dtype>::NDArray(const NDArray<dtype> &other):
     N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
     _computeStrides();
     cudaMallocManaged(&data, size * itemBytes);
+    totalAllocatedMemory += size * itemBytes;
     if (other.isContiguous() && other.offset == 0) {
         cudaMemcpy(data, other.data, size * itemBytes, cudaMemcpyDeviceToDevice);
     } else {
@@ -173,6 +184,7 @@ NDArray<dtype>::~NDArray() {
     shape.clear(); strides.clear();
     if (ownsData) {
         cudaFree(data);
+        totalAllocatedMemory -= size * itemBytes;
     }
 }
 
@@ -190,7 +202,7 @@ bool NDArray<dtype>::isContiguous() const {
 template<typename dtype>
 dtype& NDArray<dtype>::operator[](const std::vector<int>& idx) {
     if (idx.size() != ndim) {
-        throw runtime_error(to_string(ndim) + " indices are needed.");
+        throw IndexingException(to_string(ndim) + " indices are needed.");
     }
     int flat_idx = 0;
     for (int i = 0; i < ndim; i++) {
@@ -203,8 +215,8 @@ template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator[](vector<Slice> slices) {
     int n_slices = slices.size();
     if (n_slices > ndim) {
-        throw runtime_error("Too many slices. Only " + to_string(ndim) +
-            " slices are needed.");
+        throw IndexingException("Too many slices. Only " + to_string(ndim)
+            + " slices are needed.");
     }
     for (int i = 0; i < n_slices; i++) {
         slices[i].normalizeEnd(shape[i]);
@@ -271,7 +283,7 @@ void NDArray<dtype>::executeElementWise(
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        throw runtime_error(string("CUDA Error: ") + cudaGetErrorString(err));
+        throw CudaKernelException(cudaGetErrorString(err));
     }
     cudaDeviceSynchronize();
 }
@@ -286,7 +298,7 @@ NDArray<dtype>& NDArray<dtype>::operator=(const dtype &value) {
 template <typename dtype>
 NDArray<dtype>& NDArray<dtype>::operator=(const NDArray<dtype> &other) {
     if (shape != other.shape) {
-        throw runtime_error("Cannot assign array of shape " + to_string(other.shape[0]) +
+        throw ShapeMismatchException("Cannot assign array of shape " + to_string(other.shape[0]) +
         " to array of shape " + to_string(shape[0]));
     }
     if (isContiguous() && other.isContiguous() && offset == 0 && other.offset == 0) {
@@ -302,7 +314,7 @@ NDArray<dtype>& NDArray<dtype>::operator=(const NDArray<dtype> &other) {
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator+(const NDArray<dtype> &other) const {
     if (shape != other.shape) {
-        throw runtime_error("Cannot perform elementwise addition on 2 "
+        throw ShapeMismatchException("Cannot perform elementwise addition on 2 "
                             "arrays with different shapes.");
     }
     NDArray<dtype> result(shape);
@@ -320,7 +332,7 @@ NDArray<dtype> NDArray<dtype>::operator-() const {
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator-(const NDArray<dtype> &other) const {
     if (shape != other.shape) {
-        throw runtime_error("Cannot perform elementwise subtraction on 2 "
+        throw ShapeMismatchException("Cannot perform elementwise subtraction on 2 "
                             "arrays with different shapes.");
     }
     NDArray<dtype> result(shape);
@@ -378,6 +390,23 @@ ostream& operator<<(ostream &os, const NDArray<dtype> &arr) {
     return os;
 }
 
+template <typename dtype>
+istream& operator>>(istream &is, const NDArray<dtype> &arr) {
+    if (arr.ownsData) {
+        for (int i = 0; i < arr.size; i++) {
+            is >> arr.data[i];
+        }
+    }
+    else{
+        for (int i = 0; i < arr.size; i++) {
+            int real_idx = flatToStridedIndex(i, arr.offset, arr.strides,
+                arr.ndim, arr.shape);
+            is >> arr.data[real_idx];
+        }
+    }
+    return is;
+}
+
 
 // Helper to allocate device memory for strides/shape
 template <typename dtype>
@@ -392,6 +421,36 @@ void NDArray<dtype>::allocateDeviceMetadata(int** dStrides, int** dShape) const 
         cudaMemcpy(*dShape, shape.data(),
             ndim * sizeof(int), cudaMemcpyHostToDevice);
     }
+}
+
+
+
+template <typename dtype>
+vector<vector<int>> getBroadcastingDims(const NDArray<dtype> &a , const NDArray<dtype> &b) {
+    /// Helper function that returns the final shape after broadcasting,
+    /// and the axes that need broadcasting in each array for an
+    /// elementwise operation.
+    int n = a.getNDim(); int f_shape;
+    vector<int> final_shape(n); vector<int> a_broadcast(n);  vector<int> b_broadcast(n);
+    if (a.getNDim() != b.getNDim()) {
+        return vector{final_shape, a_broadcast, b_broadcast};
+    }
+    for (int i = 0; i < n; i++) {
+        if (a[i] != b[i]) {
+            if (a[i] == 1) {
+                a_broadcast.push_back(i);
+                f_shape = b[i];
+            }
+            if (b[i] == 1) {
+                b_broadcast.push_back(i);
+                f_shape = a[i];
+            }
+        } else {
+            f_shape = a[i];
+        }
+        final_shape.push_back(f_shape);
+    }
+    return vector{final_shape, a_broadcast, b_broadcast};
 }
 
 #endif //ARRC_NDARRAY_H
