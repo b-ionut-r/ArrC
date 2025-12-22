@@ -8,9 +8,11 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include "kernels.cu"
-#include "slices.cpp"
-#include "utils.cu"
+
+#include "ndarray.cuh"
+#include "elementwise_kernels.cuh"
+#include "../slices.cpp"
+#include "utils.h"
 #include "exceptions.h"
 using namespace std;
 
@@ -37,13 +39,13 @@ protected:
     // Static members
     static int idGenerator;
     static size_t totalAllocatedMemory; // GPU Memory
-    static size_t getTotalAllocatedMemory(){return totalAllocatedMemory;}
+
     // Helpers
     void allocateDeviceMetadata(int** dStrides=nullptr,
                                 int** dShape=nullptr) const;
     template <typename Op>
-    void executeElementWise(Op op, const NDArray *result,
-                            const NDArray *other = nullptr) const;
+    NDArray<dtype> executeElementWise(Op op, const NDArray *other = nullptr,
+                                      const NDArray *final = nullptr) const;
 public:
     /// CONSTRUCTORS and DESTRUCTORS
     NDArray() = default;
@@ -73,6 +75,7 @@ public:
     int getItemBytes() const {return itemBytes;}
     int getOffset() const {return offset;}
     bool getOwnsData() const {return ownsData;}
+    static size_t getTotalAllocatedMemory() { return totalAllocatedMemory; }
 
     /// UTILITY FUNCTIONS
     bool isContiguous() const;
@@ -80,17 +83,24 @@ public:
     /// OVERLOADED OPERATORS
     dtype& operator[](const std::vector<int>& idx);
     NDArray operator[](vector<Slice> slices);
+    /* this, other, final */
     NDArray& operator=(const dtype &value);
     NDArray& operator=(const NDArray &other);
     NDArray operator+(const NDArray &other) const;
+    NDArray operator+(const dtype &value) const;
     NDArray operator-() const;
     NDArray operator-(const NDArray &other) const;
+    NDArray operator-(const dtype &value) const;
+    NDArray operator*(const NDArray &other) const;
+    NDArray operator*(const dtype &value) const;
+    NDArray operator/(const NDArray &other) const;
+    NDArray operator/(const dtype &value) const;
     friend ostream& operator<< <>(ostream &os, const NDArray<dtype> &arr);
     friend istream& operator>> <>(istream &is, NDArray<dtype> &arr);
 };
 
 template<typename dtype>
-int NDArray<dtype>::idGenerator = 0; // static variable is initialized outside class
+int NDArray<dtype>::idGenerator = 0; // static variable (initialized outside class)
 template<typename dtype>
 size_t NDArray<dtype>::totalAllocatedMemory = 0;
 
@@ -243,103 +253,160 @@ NDArray<dtype> NDArray<dtype>::operator[](vector<Slice> slices) {
 
 template <typename dtype>
 template <typename Op>
-void NDArray<dtype>::executeElementWise(
+NDArray<dtype> NDArray<dtype>::executeElementWise(
     Op op,
-    const NDArray<dtype> *result,
-    const NDArray<dtype> *other
-    ) const {
-    bool allContig = isContiguous();
-    if (other) {
-        allContig = allContig && other->isContiguous();
+    const NDArray<dtype> *other,
+    const NDArray<dtype> *final) const
+{
+    /* first, second result */
+    bool allContig = this->isContiguous() && other? other->isContiguous(): true;
+    /// HANDLE BROADCASTING
+    NDArray<dtype> *result, *first, *second;
+    bool delFirst = false, delSecond = false;
+    if (other == nullptr || final != nullptr) {
+        first = this;
+        second = other;
+        result = final? final: new NDArray<dtype>(first->shape);
+    } else {
+        auto info = getBroadcastInfo(*this, *other);
+        if (info.aBroadcastAxes.empty()) first = this;
+        else {
+            vector<int> newStrides = this -> strides;
+            for (int i = 0; i < info.aBroadcastAxes.size(); i++) {
+                newStrides[info.aBroadcastAxes[i]] = 0;
+            }
+            first = new NDArray<dtype>(this->data, info.finalShape, this->offset, newStrides);
+            delFirst = true;
+        }
+        if (info.bBroadcastAxes.empty()) second = other;
+        {
+            vector<int> newStrides = other -> strides;
+            for (int i = 0; i < info.bBroadcastAxes.size(); i++) {
+                newStrides[info.bBroadcastAxes[i]] = 0;
+            }
+            second = new NDArray<dtype>(other->data, info.finalShape, other->offset, newStrides);
+            delSecond = true;
+        }
+        result = new NDArray<dtype>(info.finalShape);
     }
     if (allContig) {
         elementWiseKernelContiguous<<<N_BLOCKS, N_THREADS>>>(
             result->data, result->offset, result->size,
             op,
-            this->data, this->offset,
-            other ? other->data : nullptr, other ? other->offset : 0
+            first->data, first->offset,
+            second ? second->data : nullptr, second ? second->offset : 0
         );
         cudaDeviceSynchronize();
     } else {
-        int *dResultStrides, *dStrides, *dOtherStrides = nullptr, *dShape;
-        result->allocateDeviceMetadata(&dResultStrides, &dShape);
-        allocateDeviceMetadata(&dStrides, nullptr);
-        if (other) {
-            other->allocateDeviceMetadata(&dOtherStrides, nullptr);
-        }
+        int *dResultShape;
+        int *dResultStrides, *dFirstStrides, *dSecondStrides = nullptr;
+        result->allocateDeviceMetadata(&dResultStrides, &dResultShape);
+        first->allocateDeviceMetadata(&dFirstStrides, nullptr);
+        if (second) second->allocateDeviceMetadata(&dSecondStrides, nullptr);
         elementWiseKernelStrided<<<N_BLOCKS, N_THREADS>>>(
             result->data, result->offset, dResultStrides,
-            result->size, result->ndim, dShape,
+            result->size, result->ndim, dResultShape,
             op,
-            this->data, this->offset, dStrides,
-            other ? other->data : nullptr, other ? other->offset : 0, dOtherStrides
+            first->data, first->offset, dFirstStrides,
+            second ? second->data : nullptr, second ? second->offset : 0, dSecondStrides
         );
         cudaDeviceSynchronize();
-        if (other) {
-            cudaFreeMulti({dResultStrides, dStrides, dOtherStrides, dShape});
-        } else {
-            cudaFreeMulti({dResultStrides, dStrides, dShape});
-        }
+        cudaFreeMulti({dResultShape, dResultStrides, dFirstStrides, dSecondStrides}); // avoid memory leak
+        if (second) cudaFree(dSecondStrides);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         throw CudaKernelException(cudaGetErrorString(err));
     }
     cudaDeviceSynchronize();
+    if (delFirst) delete first;
+    if (delSecond) delete second;
+    return *result;
 }
 
 
 template <typename dtype>
 NDArray<dtype>& NDArray<dtype>::operator=(const dtype &value) {
-    executeElementWise(SetConstantOp<dtype>{value}, this, nullptr); // inplace execution
-    return *this;
+    return executeElementWise(SetConstantOp<dtype>{value}, nullptr, this); // inplace execution
 }
 
 template <typename dtype>
 NDArray<dtype>& NDArray<dtype>::operator=(const NDArray<dtype> &other) {
-    if (shape != other.shape) {
-        throw ShapeMismatchException("Cannot assign array of shape " + to_string(other.shape[0]) +
-        " to array of shape " + to_string(shape[0]));
-    }
+    if (shape != other.shape)
+        throw ShapeMismatchException("Cannot assign arrays of different shapes.");
     if (isContiguous() && other.isContiguous() && offset == 0 && other.offset == 0) {
         cudaMemcpy(data, other.data, size * itemBytes, cudaMemcpyDeviceToDevice);
         cudaDeviceSynchronize();
         return *this;
     }
-    executeElementWise(AssignOp<dtype>{}, this,  &other); // inplace execution
-    return *this;
+    return executeElementWise(AssignOp<dtype>{}, &other, this); // inplace execution
 }
 
 
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator+(const NDArray<dtype> &other) const {
-    if (shape != other.shape) {
-        throw ShapeMismatchException("Cannot perform elementwise addition on 2 "
-                            "arrays with different shapes.");
-    }
-    NDArray<dtype> result(shape);
-    executeElementWise(AffineAddOp<dtype>{1, 1}, &result, &other);
-    return result;
+    return executeElementWise(AffineAddOp<dtype>{1, 1}, &other, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> NDArray<dtype>::operator+(const dtype &value) const {
+    return executeElementWise(ScalarAddOp<dtype>{value}, nullptr, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> operator+(dtype value, const NDArray<dtype> &arr) {
+    return arr + value;
 }
 
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator-() const {
-    NDArray<dtype> result(shape);
-    executeElementWise(ScalarMulOp<dtype>{-1}, &result, nullptr);
-    return result;
+    return executeElementWise(ScalarMulOp<dtype>{-1}, nullptr, nullptr);
 }
 
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator-(const NDArray<dtype> &other) const {
-    if (shape != other.shape) {
-        throw ShapeMismatchException("Cannot perform elementwise subtraction on 2 "
-                            "arrays with different shapes.");
-    }
-    NDArray<dtype> result(shape);
-    executeElementWise(AffineAddOp<dtype>{1, -1}, &result, &other);
-    return result;
+    return executeElementWise(AffineAddOp<dtype>{1, -1}, &other, nullptr);
 }
 
+template <typename dtype>
+NDArray<dtype> NDArray<dtype>::operator-(const dtype &value) const {
+    return executeElementWise(ScalarAddOp<dtype>{-value}, nullptr, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> operator-(const dtype &value, const NDArray<dtype> &arr) {
+    return arr.executeElementWise(ScalarRSubOp<dtype>{value}, nullptr, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> NDArray<dtype>::operator*(const NDArray<dtype> &other) const {
+    return executeElementWise(MulOp<dtype>{}, &other, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> NDArray<dtype>::operator*(const dtype &value) const {
+    return executeElementWise(ScalarMulOp<dtype>{value}, nullptr, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> operator*(const dtype &value, const NDArray<dtype> &arr) {
+    return arr * value;
+}
+
+template <typename dtype>
+NDArray<dtype> NDArray<dtype>::operator/(const NDArray<dtype> &other) const {
+    return executeElementWise(DivOp<dtype>{}, &other, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> NDArray<dtype>::operator/(const dtype &value) const {
+    return executeElementWise(ScalarMulOp<dtype>{1/value}, nullptr, nullptr);
+}
+
+template <typename dtype>
+NDArray<dtype> operator/(const dtype &value, const NDArray<dtype> &arr) {
+    return arr.executeElementWise(ScalarRDivOp<dtype>{value}, nullptr, nullptr);
+}
 
 template <typename dtype>
 ostream& operator<<(ostream &os, const NDArray<dtype> &arr) {
@@ -391,7 +458,7 @@ ostream& operator<<(ostream &os, const NDArray<dtype> &arr) {
 }
 
 template <typename dtype>
-istream& operator>>(istream &is, const NDArray<dtype> &arr) {
+istream& operator>>(istream &is, NDArray<dtype> &arr) {
     if (arr.ownsData) {
         for (int i = 0; i < arr.size; i++) {
             is >> arr.data[i];
@@ -425,32 +492,43 @@ void NDArray<dtype>::allocateDeviceMetadata(int** dStrides, int** dShape) const 
 
 
 
+/// BROADCASTING HELPERS ///
 template <typename dtype>
-vector<vector<int>> getBroadcastingDims(const NDArray<dtype> &a , const NDArray<dtype> &b) {
-    /// Helper function that returns the final shape after broadcasting,
-    /// and the axes that need broadcasting in each array for an
-    /// elementwise operation.
-    int n = a.getNDim(); int f_shape;
-    vector<int> final_shape(n); vector<int> a_broadcast(n);  vector<int> b_broadcast(n);
-    if (a.getNDim() != b.getNDim()) {
-        return vector{final_shape, a_broadcast, b_broadcast};
+struct BroadcastInfo {
+    vector<int> finalShape;  // container 1
+    list<int> aBroadcastAxes; // container 2
+    list<int> bBroadcastAxes; // container 2
+};
+
+template <typename dtype>
+BroadcastInfo<dtype> getBroadcastingDims(const NDArray<dtype> &a, const NDArray<dtype> &b) {
+    BroadcastInfo<dtype> out;
+    // Quick checks
+    const int n = a.getNDim();
+    if (n != b.getNDim()) {
+        throw NDimMismatchException("Arrays of different ndims. Cannot broadcast.");
     }
+    if (a.getShape == b.getShape) {
+        out.finalShape = a.getShape();
+        return out;
+    }
+    out.finalShape.reserve(n);
     for (int i = 0; i < n; i++) {
-        if (a[i] != b[i]) {
-            if (a[i] == 1) {
-                a_broadcast.push_back(i);
-                f_shape = b[i];
-            }
-            if (b[i] == 1) {
-                b_broadcast.push_back(i);
-                f_shape = a[i];
-            }
+        const int da = a[i]; // ideal: a.getShape()[i]
+        const int db = b[i]; // ideal: b.getShape()[i]
+        if (da == db) {
+            out.finalShape.push_back(da);
+        } else if (da == 1) {
+            out.aBroadcastAxes.push_back(i);
+            out.finalShape.push_back(db);
+        } else if (db == 1) {
+            out.bBroadcastAxes.push_back(i);
+            out.finalShape.push_back(da);
         } else {
-            f_shape = a[i];
+            throw ShapeMismatchException("Arrays of different shapes. Cannot broadcast");
         }
-        final_shape.push_back(f_shape);
     }
-    return vector{final_shape, a_broadcast, b_broadcast};
+    return out;
 }
 
 #endif //ARRC_NDARRAY_H
