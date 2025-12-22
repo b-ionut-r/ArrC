@@ -557,4 +557,6 @@ using NDArrayPtrVariant = std::variant<
     NDArray<__half>*
 >;
 
+
+
 #endif //ARRC_NDARRAY_H

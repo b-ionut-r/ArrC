@@ -17,6 +17,7 @@ add_executable(ArrC
         src/slices.cpp
         include/elementwise_kernels.cuh
         include/losses/loss.h
+        include/nn/losses.h
 )
 
 set_target_properties(ArrC PROPERTIES

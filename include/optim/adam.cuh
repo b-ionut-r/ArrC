@@ -7,8 +7,8 @@
 
 #include <iostream>
 #include "optimizer.h"
-#include "ndarray.cuh"
 #include "tensor.h"
+#include "ndarray.cuh"
 
 class Adam: public Optimizer {
 private:

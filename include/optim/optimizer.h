@@ -3,8 +3,8 @@
 #include <unordered_map>
 #include <vector>
 #include <variant>
-#include "ndarray.cuh"
 #include "tensor.h"
+#include "ndarray.cuh"
 
 using StateValue = std::variant<
           size_t,

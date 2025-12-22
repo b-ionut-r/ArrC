@@ -40,3 +40,4 @@ void cudaFreeMulti(std::vector<void*> cuda_ptrs) {
         cudaFree(ptr);
     }
 }
+
