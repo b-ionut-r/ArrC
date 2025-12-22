@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include "optim/sgd.h"
+#include "optim/sgd.cuh"
 #include "optim/kernels.cuh"
 #include "exceptions.h"
 #include "ndarray.cuh"

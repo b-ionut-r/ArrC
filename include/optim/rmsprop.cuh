@@ -16,7 +16,9 @@ public:
     RMSProp(const std::vector<Tensor*> &params, const float &lr,
             const float &weightDecay, const float &beta,
             const double &eps = 1e-8, const ComputeDType &dtype = FLOAT):
-        Optimizer(params, lr, weightDecay, dtype), beta(beta), eps(eps) {};
+        Optimizer(params, lr, weightDecay, dtype), beta(beta), eps(eps) {
+        // TODO: momentum initialization logic
+    };
     ~RMSProp() override {
         for (auto &mom: momentum) {
             delete mom;

@@ -24,7 +24,9 @@ public:
          const double &eps = 1e-8, const ComputeDType &dtype = FLOAT,
          const bool &adamW = false):
         Optimizer(params, lr, weightDecay, dtype),
-        beta1(beta1),beta2(beta2), eps(eps), adamW(adamW){};
+        beta1(beta1),beta2(beta2), eps(eps), adamW(adamW) {
+        // TODO: firstMomentum, secondMomentum initialization logic
+    };
     ~Adam() override {
         for (auto &mom: firstMomentum) {
             delete mom;

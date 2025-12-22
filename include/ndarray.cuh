@@ -8,13 +8,13 @@
 #include <iostream>
 #include <vector>
 #include <string>
-
+#include <list>
 #include "ndarray.cuh"
 #include "elementwise_kernels.cuh"
-#include "../slices.cpp"
+#include "slices.h"
 #include "utils.h"
 #include "exceptions.h"
-using namespace std;
+#include <cuda_fp16.h>
 
 
 /// FORWARD DECLARATIONS FOR OSTREAM
@@ -508,7 +508,7 @@ BroadcastInfo<dtype> getBroadcastingDims(const NDArray<dtype> &a, const NDArray<
     if (n != b.getNDim()) {
         throw NDimMismatchException("Arrays of different ndims. Cannot broadcast.");
     }
-    if (a.getShape == b.getShape) {
+    if (a.getShape() == b.getShape()) {
         out.finalShape = a.getShape();
         return out;
     }
@@ -530,5 +530,24 @@ BroadcastInfo<dtype> getBroadcastingDims(const NDArray<dtype> &a, const NDArray<
     }
     return out;
 }
+
+
+
+/// VARIANTS
+using NDArrayVariant = std::variant<
+    NDArray<int>,
+    NDArray<size_t>,
+    NDArray<float>,
+    NDArray<double>,
+    NDArray<__half>
+>;
+
+using NDArrayPtrVariant = std::variant<
+    NDArray<int>*,
+    NDArray<size_t>*,
+    NDArray<float>*,
+    NDArray<double>*,
+    NDArray<__half>*
+>;
 
 #endif //ARRC_NDARRAY_H

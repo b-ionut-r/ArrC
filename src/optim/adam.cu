@@ -5,7 +5,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include "optim/adam.h"
+#include "optim/adam.cuh"
 #include "optim/kernels.cuh"
 #include "exceptions.h"
 #include "ndarray.cuh"

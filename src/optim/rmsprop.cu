@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include "optim/rmsprop.h"
+#include "optim/rmsprop.cuh"
 #include "optim/kernels.cuh"
 #include "exceptions.h"
 #include "ndarray.cuh"

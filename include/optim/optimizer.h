@@ -53,9 +53,3 @@ public:
     void setWeightDecay(const float &weight_decay) {this->weightDecay = weight_decay;}
     friend std::ostream operator<<(std::ostream &os, const Optimizer &opt) = 0;
 };
-
-Optimizer::~Optimizer() {
-    for (auto &param: params)
-        delete param;
-    params.clear();
-}

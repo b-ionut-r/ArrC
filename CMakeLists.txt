@@ -7,13 +7,13 @@ add_executable(ArrC
         src/elementwise_kernels.cu
         include/ndarray.cuh
         include/exceptions.h
-        src/optim/sgd.cpp
+        src/optim/sgd.cu
         include/tensor.h
         include/serialize.h
-        include/optim/sgd.h
-        src/optim/rmsprop.cpp
-        src/optim/adam.cpp
-        src/optim/adam.cpp
+        include/optim/sgd.cuh
+        src/optim/rmsprop.cu
+        src/optim/adam.cu
+        src/optim/adam.cu
         include/slices.h
         src/slices.cpp
         include/elementwise_kernels.cuh

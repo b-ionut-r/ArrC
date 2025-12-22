@@ -14,7 +14,9 @@ private:
 public:
     SGD(const std::vector<Tensor*> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype = FLOAT):
-        Optimizer(params, lr, weightDecay, dtype), beta(beta) {};
+        Optimizer(params, lr, weightDecay, dtype), beta(beta) {
+        // TODO: momentum initialization logic
+    };
     ~SGD() override {
         for (auto &mom: momentum) {
             delete mom;
