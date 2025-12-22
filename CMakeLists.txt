@@ -4,7 +4,6 @@ project(ArrC CUDA)
 set(CMAKE_CUDA_STANDARD 20)
 
 add_executable(ArrC
-        src/elementwise_kernels.cu
         include/ndarray.cuh
         include/exceptions.h
         src/optim/sgd.cu

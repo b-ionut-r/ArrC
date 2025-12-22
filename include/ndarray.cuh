@@ -262,7 +262,7 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
     bool allContig = this->isContiguous() && other? other->isContiguous(): true;
     /// HANDLE BROADCASTING
     NDArray<dtype> *result, *first, *second;
-    bool delFirst = false, delSecond = false;
+    bool delFirst = false, delSecond = false, delResult = false;
     if (other == nullptr || final != nullptr) {
         first = this;
         second = other;
@@ -288,6 +288,7 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
             delSecond = true;
         }
         result = new NDArray<dtype>(info.finalShape);
+        delResult = true;
     }
     if (allContig) {
         elementWiseKernelContiguous<<<N_BLOCKS, N_THREADS>>>(
@@ -321,7 +322,13 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
     cudaDeviceSynchronize();
     if (delFirst) delete first;
     if (delSecond) delete second;
-    return *result;
+    if (delResult) {
+        NDArray retVal = std::move(*result);
+        delete result;
+        return retVal;
+    } else {
+        return *result;
+    }
 }
 
 
