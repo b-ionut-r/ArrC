@@ -32,7 +32,7 @@ class NDArrayBase {
 public:
     virtual ~NDArrayBase() = 0;
 };
-NDArrayBase::~NDArrayBase() {} // for std::vector of base pointers
+NDArrayBase::~NDArrayBase() {} // for std::vector of templated pointers
 
 template <typename dtype>
 class NDArray: public NDArrayBase{
@@ -57,7 +57,7 @@ protected:
 public:
     using value_type = dtype;
     /// CONSTRUCTORS and DESTRUCTORS
-    NDArray() = default;
+    NDArray(); // default constructor
     NDArray(const vector<int> &shape); // alocator constructor
     void _computeStrides();
     NDArray(dtype *data, const vector<int> &shape, const int &offset,
@@ -118,6 +118,21 @@ size_t NDArray<dtype>::totalAllocatedMemory = 0;
 
 
 /// DEFINITIONS FOR TEMPLATES ALSO NEED TO BE IN HEADER ///
+
+template<typename dtype>
+NDArray<dtype>::NDArray():
+    data(nullptr),
+    shape({}),
+    ndim(0),
+    strides({}),
+    itemBytes(sizeof(dtype)),
+    offset(0),
+    ownsData(false),
+    id(++idGenerator),
+    size(0),
+    N_BLOCKS(0){
+};
+
 
 template<typename dtype>
 NDArray<dtype>::NDArray(const vector<int> &shape):
@@ -562,28 +577,9 @@ NDArray<newDtype> NDArray<dtype>::cast() const {
     return executeElementWise(CastOp<newDtype, dtype>{}, nullptr, nullptr);
 }
 
-/// VARIANTS
-using NDArrayVariant = std::variant<
-    NDArray<int>,
-    NDArray<size_t>,
-    NDArray<float>,
-    NDArray<double>,
-    NDArray<__half>
->;
-
-using NDArrayPtrVariant = std::variant<
-    NDArray<int>*,
-    NDArray<size_t>*,
-    NDArray<float>*,
-    NDArray<double>*,
-    NDArray<__half>*
->;
-
 namespace arr {
     template <typename dtype>
     using NDArray = NDArray<dtype>;
-    using NDArrayVariant = NDArrayVariant;
-    using NDArrayPtrVariant = NDArrayPtrVariant;
 
     template <typename dtype>
     NDArray<dtype> make_constant(const vector<int> &shape, const dtype &value) {

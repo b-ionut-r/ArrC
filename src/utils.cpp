@@ -35,7 +35,7 @@ int flatToStridedIndex(const int idx, const int offset, const std::vector<int> &
     return final_idx;
 }
 
-void cudaFreeMulti(std::vector<void*> &cuda_ptrs) {
+void cudaFreeMulti(const std::vector<void*> &cuda_ptrs) {
     for (auto ptr: cuda_ptrs) {
         cudaFree(ptr);
     }
