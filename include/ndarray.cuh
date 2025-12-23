@@ -67,7 +67,6 @@ public:
 
     /// GETTERS and SETTERS (inline)
     dtype* getData() {return data;}
-    void setData(dtype *new_data) {data = new_data;}
     vector<int> getShape() const {return shape;}
     int getNDim() const {return ndim;}
     int getSize() const {return size;}
@@ -134,7 +133,10 @@ NDArray<dtype>::NDArray(const vector<int> &shape):
     }
     N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
     _computeStrides();
-    cudaMallocManaged(&data, size * itemBytes);
+    cudaError_t err = cudaMallocManaged(&data, size * itemBytes);
+    if (err != cudaSuccess) {
+        throw CudaKernelException("OOM during NDArray allocation");
+    }
     totalAllocatedMemory += size * itemBytes;
 }
 
@@ -290,7 +292,7 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
             delFirst = true;
         }
         if (info.bBroadcastAxes.empty()) second = other;
-        {
+        else{
             vector<int> newStrides = other -> strides;
             for (int i = 0; i < info.bBroadcastAxes.size(); i++) {
                 newStrides[info.bBroadcastAxes[i]] = 0;
@@ -323,16 +325,17 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
             second ? second->data : nullptr, second ? second->offset : 0, dSecondStrides
         );
         cudaDeviceSynchronize();
-        cudaFreeMulti({dResultShape, dResultStrides, dFirstStrides, dSecondStrides}); // avoid memory leak
+        cudaFreeMulti({dResultShape, dResultStrides, dFirstStrides}); // avoid memory leak
         if (second) cudaFree(dSecondStrides);
     }
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw CudaKernelException(cudaGetErrorString(err));
-    }
     cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
     if (delFirst) delete first;
     if (delSecond) delete second;
+    if (err != cudaSuccess) {
+        if (delResult) delete result;
+        throw CudaKernelException(cudaGetErrorString(err));
+    }
     if (delResult) {
         NDArray retVal = std::move(*result);
         delete result;
@@ -532,8 +535,8 @@ BroadcastInfo<dtype> getBroadcastingDims(const NDArray<dtype> &a, const NDArray<
     }
     out.finalShape.reserve(n);
     for (int i = 0; i < n; i++) {
-        const int da = a[i]; // ideal: a.getShape()[i]
-        const int db = b[i]; // ideal: b.getShape()[i]
+        const int da = a.getShape()[i];
+        const int db = b.getShape()[i]; 
         if (da == db) {
             out.finalShape.push_back(da);
         } else if (da == 1) {

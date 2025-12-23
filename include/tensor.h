@@ -13,6 +13,7 @@
 
 class TensorBase{
 public:
+    TensorBase() = default;
     virtual ~TensorBase() = 0;
 };
 

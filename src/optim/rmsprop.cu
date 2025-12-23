@@ -13,7 +13,7 @@
 #include <cuda_fp16.h>
 
 
-RMSProp::RMSProp(const std::vector<Tensor*> &params, const float &lr,
+RMSProp::RMSProp(const std::vector<TensorBase*> &params, const float &lr,
                  const float &weightDecay, const float &beta,
                  const double &eps, const ComputeDType &dtype):
        Optimizer(params, lr, weightDecay, dtype), beta(beta), eps(eps) {
@@ -67,26 +67,6 @@ void RMSProp::step() {
         };
     };
     t++;
-}
-
-StateDict RMSProp::getStateDict() const {
-    StateDict state;
-    state["lr"] = lr;
-    state["weight_decay"] = weightDecay;
-    state["beta"] = beta;
-    state["t"] = t;
-    state["momentum"] = momentum;
-    state["eps"] = eps;
-    return state;
-}
-
-void RMSProp::loadStateDict(const StateDict &state) {
-    lr = state["lr"];
-    weightDecay = state["weightDecay"];
-    beta = state["beta"];
-    t = state["t"];
-    momentum = state["momentum"];
-    eps = state["eps"];
 }
 
 ostream & operator<<(ostream &os, const RMSProp &rms) {

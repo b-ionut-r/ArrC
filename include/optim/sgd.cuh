@@ -13,12 +13,10 @@ private:
     float beta;
     std::vector<NDArrayBase*> momentum;
 public:
-    SGD(const std::vector<Tensor*> &params, const float &lr,
+    SGD(const std::vector<TensorBase*> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype = FLOAT);
     ~SGD() override;
     void step() override;
-    StateDict getStateDict() const override;
-    void loadStateDict(const StateDict &state) override;
     friend std::ostream & operator<<(std::ostream &os, const SGD &sgd);
     float getBeta() const {return beta;}
 };

@@ -6,25 +6,16 @@
 #include "tensor.h"
 #include "ndarray.cuh"
 
-using StateValue = std::variant<
-          size_t,
-          float,
-          NDArray*,
-          std::vector<NDArray*>
->;
-using StateDict = std::unordered_map<std::string, StateValue>;
-
+/*
+ Abstract Base Class for Deep Learning Optimizers.
+ Design Pattern 1: STRATEGY (step method).
+*/
 enum ComputeDType {
     HALF,
     FLOAT,
     DOUBLE
 };
 
-
-/*
- Abstract Base Class for Deep Learning Optimizers.
- Design Pattern 1: STRATEGY (step method).
-*/
 class Optimizer {
 protected:
     std::vector<TensorBase*>params;
@@ -43,8 +34,6 @@ public:
         for (auto &param: params)
             param->zeroGrad();
     }
-    virtual StateDict getStateDict() const = 0;
-    virtual void loadStateDict(const StateDict &state) = 0;
     float getLR() const {return lr;}
     float getWeightDecay() const {return weightDecay;}
     size_t getT() const {return t;}

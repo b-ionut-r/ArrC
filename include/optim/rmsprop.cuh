@@ -13,13 +13,11 @@ private:
     double eps;
     std::vector<NDArrayBase*> momentum;
 public:
-    RMSProp(const std::vector<Tensor*> &params, const float &lr,
+    RMSProp(const std::vector<TensorBase*> &params, const float &lr,
                      const float &weightDecay, const float &beta,
                      const double &eps = 1e-8, const ComputeDType &dtype = FLOAT);
     ~RMSProp() override;
     void step() override;
-    StateDict getStateDict() const override;
-    void loadStateDict(const StateDict &state) override;
     friend std::ostream & operator<<(std::ostream &os, const RMSProp &sgd);
     float getBeta() const {return beta;}
     double getEps() const {return eps;}

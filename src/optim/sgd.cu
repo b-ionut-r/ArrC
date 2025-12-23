@@ -13,7 +13,7 @@
 #include <cuda_fp16.h>
 
 
-SGD::SGD(const std::vector<Tensor*> &params, const float &lr,
+SGD::SGD(const std::vector<TensorBase*> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype):
         Optimizer(params, lr, weightDecay, dtype), beta(beta) {
     for (int i = 0; i < params.size(); i++) {
@@ -65,24 +65,6 @@ void SGD::step() {
         };
     };
     t++;
-}
-
-StateDict SGD::getStateDict() const {
-    StateDict state;
-    state["lr"] = lr;
-    state["weight_decay"] = weightDecay;
-    state["beta"] = beta;
-    state["t"] = t;
-    state["momentum"] = momentum;
-    return state;
-}
-
-void SGD::loadStateDict(const StateDict &state) {
-    lr = state["lr"];
-    weightDecay = state["weightDecay"];
-    beta = state["beta"];
-    t = state["t"];
-    momentum = state["momentum"];
 }
 
 ostream & operator<<(ostream &os, const SGD &sgd) {

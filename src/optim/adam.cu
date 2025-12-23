@@ -12,7 +12,7 @@
 #include "tensor.h"
 #include <cuda_fp16.h>
 
-Adam::Adam(const std::vector<Tensor*> &params, const float &lr,
+Adam::Adam(const std::vector<TensorBase*> &params, const float &lr,
         const float &weightDecay, const float &beta1, const float &beta2,
         const double &eps, const ComputeDType &dtype,
         const bool &adamW):
@@ -84,32 +84,6 @@ void Adam::step() {
         };
     };
     t++;
-}
-
-StateDict Adam::getStateDict() const {
-    StateDict state;
-    state["lr"] = lr;
-    state["weight_decay"] = weightDecay;
-    state["beta1"] = beta1;
-    state["beta2"] = beta2;
-    state["t"] = t;
-    state["firstMomentum"] = firstMomentum;
-    state["secondMomentum"] = secondMomentum;
-    state["eps"] = eps;
-    state["adamW"] = adamW;
-    return state;
-}
-
-void Adam::loadStateDict(const StateDict &state) {
-    lr = state["lr"];
-    weightDecay = state["weightDecay"];
-    beta1 = state["beta"];
-    beta2 = state["beta2"];
-    t = state["t"];
-    firstMomentum = state["firstMomentum"];
-    secondMomentum = state["secondMomentum"];
-    eps = state["eps"];
-    adamW = state["adamW"];
 }
 
 ostream & operator<<(ostream &os, const Adam &adam) {

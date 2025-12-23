@@ -9,10 +9,8 @@
 
 class Slice {
     int start, stop, step;
-    int *indices;
 public:
     Slice(int start, int stop, int step=1) : start(start), stop(stop), step(step) {};
-    std::vector<int> getIndices() const;
     int size() const;
     void normalizeEnd(int shape_size);
     int getStart() const {return start;}

@@ -5,13 +5,6 @@
 #include "slices.h"
 #include <vector>
 
-std::vector<int> Slice::getIndices() const {
-    std::vector<int> indices;
-    for (int idx: *this) {
-        indices.push_back(idx);
-    }
-    return indices;
-}
 int Slice::size() const {
     if (step > 0) {
         if (stop <= start) return 0;
