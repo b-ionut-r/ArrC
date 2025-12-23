@@ -11,20 +11,12 @@ class RMSProp: public Optimizer {
 private:
     float beta;
     double eps;
-    std::vector<NDArray*> momentum;
+    std::vector<NDArrayBase*> momentum;
 public:
     RMSProp(const std::vector<Tensor*> &params, const float &lr,
-            const float &weightDecay, const float &beta,
-            const double &eps = 1e-8, const ComputeDType &dtype = FLOAT):
-        Optimizer(params, lr, weightDecay, dtype), beta(beta), eps(eps) {
-        // TODO: momentum initialization logic
-    };
-    ~RMSProp() override {
-        for (auto &mom: momentum) {
-            delete mom;
-        }
-        momentum.clear();
-    };
+                     const float &weightDecay, const float &beta,
+                     const double &eps = 1e-8, const ComputeDType &dtype = FLOAT);
+    ~RMSProp() override;
     void step() override;
     StateDict getStateDict() const override;
     void loadStateDict(const StateDict &state) override;

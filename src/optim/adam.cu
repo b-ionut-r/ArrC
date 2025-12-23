@@ -10,13 +10,41 @@
 #include "exceptions.h"
 #include "ndarray.cuh"
 #include "tensor.h"
-#include "utils.h"
 #include <cuda_fp16.h>
+
+Adam::Adam(const std::vector<Tensor*> &params, const float &lr,
+        const float &weightDecay, const float &beta1, const float &beta2,
+        const double &eps, const ComputeDType &dtype,
+        const bool &adamW):
+       Optimizer(params, lr, weightDecay, dtype),
+       beta1(beta1),beta2(beta2), eps(eps), adamW(adamW) {
+    for (int i = 0; i < params.size(); i++) {
+        using dtype = typename decltype(*params[i]->data)::value_type;
+        NDArray<dtype> *mom = new NDArray<dtype>(params[i]->getShape());
+        mom->executeElementWise(SetConstantOp<dtype>{(dtype)0}, nullptr, mom);
+        firstMomentum.push_back(mom);
+    }
+    for (int i = 0; i < params.size(); i++) {
+        using dtype = typename decltype(*params[i]->data)::value_type;
+        NDArray<dtype> *mom = new NDArray<dtype>(params[i]->getShape());
+        mom->executeElementWise(SetConstantOp<dtype>{(dtype)0}, nullptr, mom);
+        secondMomentum.push_back(mom);
+    }
+};
+
+Adam::~Adam() override{
+    for (auto &mom : firstMomentum)
+        delete mom;
+    for (auto &mom : secondMomentum)
+        delete mom;
+    firstMomentum.clear();
+    secondMomentum.clear();
+}
 
 
 void Adam::step() {
-    biasCorrection1 = 1 - pow(beta1, t);
-    biasCorrection2 = 1 - pow(beta2, t);
+    double biasCorrection1 = 1 - pow(beta1, t);
+    double biasCorrection2 = 1 - pow(beta2, t);
     for (size_t i = 0; i < params.size(); i++) {
         auto *param = params[i]; // Tensor<>*
         auto *m1 = firstMomentum[i]; // NDArray<>*

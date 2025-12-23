@@ -27,7 +27,7 @@ enum ComputeDType {
 */
 class Optimizer {
 protected:
-    std::vector<Tensor*>params;
+    std::vector<TensorBase*>params;
     float lr;
     float weightDecay;
     size_t t = 0;
@@ -53,3 +53,5 @@ public:
     void setWeightDecay(const float &weight_decay) {this->weightDecay = weight_decay;}
     friend std::ostream operator<<(std::ostream &os, const Optimizer &opt) = 0;
 };
+
+Optimizer::~Optimizer(){};

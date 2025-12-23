@@ -6,23 +6,16 @@
 #define ARRC_SGD_H
 #include <iostream>
 #include "optimizer.h"
+#include "ndarray.cuh"
 
 class SGD: public Optimizer {
 private:
     float beta;
-    std::vector<NDArray*> momentum;
+    std::vector<NDArrayBase*> momentum;
 public:
     SGD(const std::vector<Tensor*> &params, const float &lr,
-        const float &weightDecay, const float &beta, const ComputeDType &dtype = FLOAT):
-        Optimizer(params, lr, weightDecay, dtype), beta(beta) {
-        // TODO: momentum initialization logic
-    };
-    ~SGD() override {
-        for (auto &mom: momentum) {
-            delete mom;
-        }
-        momentum.clear();
-    };
+        const float &weightDecay, const float &beta, const ComputeDType &dtype = FLOAT);
+    ~SGD() override;
     void step() override;
     StateDict getStateDict() const override;
     void loadStateDict(const StateDict &state) override;

@@ -56,6 +56,12 @@ __global__ void elementWiseKernelStrided(
 }
 
 /// FUNCTORS
+template <typename newDtype, typename dtype>
+struct CastOp {
+    __device__ newDtype operator()(dtype a, dtype) const {
+        return (newDtype)a;
+    }
+};
 template <typename dtype>
 struct SetConstantOp {
     dtype value;

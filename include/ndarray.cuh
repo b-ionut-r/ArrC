@@ -16,6 +16,8 @@
 #include "exceptions.h"
 #include <cuda_fp16.h>
 
+#include "ndarray.cuh"
+
 
 /// FORWARD DECLARATIONS FOR OSTREAM
 template <typename dtype>
@@ -26,8 +28,12 @@ template <typename dtype>
 istream& operator>>(istream &is, NDArray<dtype> &arr);
 ///
 
+class NDArrayBase {
+    virtual ~NDArrayBase() = 0;
+};
+
 template <typename dtype>
-class NDArray {
+class NDArray: public NDArrayBase{
 protected:
     dtype *data;
     vector<int> shape; int ndim; int size;
@@ -47,6 +53,7 @@ protected:
     NDArray<dtype> executeElementWise(Op op, const NDArray *other = nullptr,
                                       const NDArray *final = nullptr) const;
 public:
+    using value_type = dtype;
     /// CONSTRUCTORS and DESTRUCTORS
     NDArray() = default;
     NDArray(const vector<int> &shape); // alocator constructor
@@ -97,6 +104,10 @@ public:
     NDArray operator/(const dtype &value) const;
     friend ostream& operator<< <>(ostream &os, const NDArray<dtype> &arr);
     friend istream& operator>> <>(istream &is, NDArray<dtype> &arr);
+
+    /// OTHERS
+    template <typename newDtype>
+    NDArray<newDtype> cast() const;
 };
 
 template<typename dtype>
@@ -539,6 +550,11 @@ BroadcastInfo<dtype> getBroadcastingDims(const NDArray<dtype> &a, const NDArray<
 }
 
 
+template <typename dtype>
+template <typename newDtype>
+NDArray<newDtype> NDArray<dtype>::cast() const {
+    return executeElementWise(CastOp<newDtype, dtype>{}, nullptr, nullptr);
+}
 
 /// VARIANTS
 using NDArrayVariant = std::variant<
@@ -557,6 +573,28 @@ using NDArrayPtrVariant = std::variant<
     NDArray<__half>*
 >;
 
+namespace arr {
+    template <typename dtype>
+    using NDArray = NDArray<dtype>;
+    using NDArrayVariant = NDArrayVariant;
+    using NDArrayPtrVariant = NDArrayPtrVariant;
+
+    template <typename dtype>
+    NDArray<dtype> make_constant(const vector<int> &shape, const dtype &value) {
+        NDArray<dtype> array(shape);
+        array = (dtype)value;
+        return array;
+    }
+
+    template <typename dtype>
+    NDArray<dtype> make_zeros(const vector<int> &shape) {
+        return make_constant(shape, (dtype)0);
+    }
+    template <typename dtype>
+    NDArray<dtype> make_ones(const vector<int> &shape) {
+        return make_constant(shape, (dtype)1);
+    }
+}
 
 
 #endif //ARRC_NDARRAY_H
