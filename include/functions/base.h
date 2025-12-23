@@ -56,7 +56,7 @@ std::shared_ptr<T> Function::operator()(const std::vector<tensor::TensorSharedVa
     auto output = forward(parents_data);
     return std::visit([&](auto output_ptr) -> std::shared_ptr<T> {
         using dtype = typename std::decay_t<decltype(*output_ptr)>::value_type;
-        if constexpr (std::is_same_v<T, Tensor<dtype>>) {
+        if constexpr (std::is_same_v<T, TensorPtr<dtype>>) {
             // Wrap output in unique_ptr first for exception safety
             auto output_unique = std::unique_ptr<NDArray<dtype>>(output_ptr);
             // Pass self (shared_ptr to this Function) for Tensor ownership

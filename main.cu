@@ -130,24 +130,23 @@ int main() {
             // ===== DEMO TENSOR + AUTOGRAD =====
             cout << "\n--- Demo Tensor & Autograd ---\n";
 
-            // Use make_tensor helper for safe shared_ptr creation
-            auto x = tensor::make_tensor<float>({1}, true);  // requires_grad = true
-            auto y = tensor::make_tensor<float>({1}, true);
-            (*x->getDataPtr())[{0}] = 3.0f;
-            (*y->getDataPtr())[{0}] = 4.0f;
+            // Handle-style Tensor API (shared_ptr internally)
+            Tensor<float> x = tensor::zeros<float>({1}, true);
+            Tensor<float> y = tensor::zeros<float>({1}, true);
+            x.data()[{0}] = 3.0f;
+            y.data()[{0}] = 4.0f;
 
-            cout << "x = " << x->getData() << endl;
-            cout << "y = " << y->getData() << endl;
+            cout << "x = " << x.data() << endl;
+            cout << "y = " << y.data() << endl;
 
-            // Construim graf: z = x * y (now uses shared_ptr)
-            auto mul = functions::mul();
-            auto z = mul->operator()<Tensor<float>>({x, y}, mul);  // Pass self for ownership
-            cout << "z = x * y = " << z->getData() << endl;
+            // Construim graf: z = x * y
+            auto z = x * y;
+            cout << "z = x * y = " << z.data() << endl;
 
             // Backward pass
-            z->backward();
-            cout << "dz/dx = " << *(x->getGrad()) << " (ar trebui 4)\n";
-            cout << "dz/dy = " << *(y->getGrad()) << " (ar trebui 3)\n";
+            z.backward();
+            cout << "dz/dx = " << *(x.getGrad()) << " (ar trebui 4)\n";
+            cout << "dz/dy = " << *(y.getGrad()) << " (ar trebui 3)\n";
 
             // No global registry - Functions are owned by Tensors
 
@@ -159,12 +158,11 @@ int main() {
             // ===== DEMO OPTIMIZERS (POLIMORFISM) =====
             cout << "\n--- Demo Optimizers ---\n";
 
-            // Cream un tensor pentru parametri (using shared_ptr)
-            auto w = tensor::make_tensor<float>({2, 2}, true);
-            *w->getDataPtr() = 1.0f;
-            *(const_cast<NDArray<float>*>(w->getGrad())) = 0.1f;
+            // Cream un tensor pentru parametri (handle-style API)
+            Tensor<float> w = tensor::ones<float>({2, 2}, true);
+            *w.getGradPtr() = 0.1f;
 
-            vector<tensor::TensorSharedVariant> params = {w};
+            vector<tensor::TensorSharedVariant> params = {w.shared()};
 
             // Strategy Pattern - diferiti optimizeri
             SGD sgd(params, 0.01f, 0.0f, 0.9f, FLOAT);
@@ -177,7 +175,7 @@ int main() {
             cout << "Apelam step() prin base class pointer:\n";
             for (Optimizer* o : optimizers) {
                 o->zeroGrad();
-                *(const_cast<NDArray<float>*>(w->getGrad())) = 0.1f;
+                *w.getGradPtr() = 0.1f;
                 optimizeStep(o);  // UPCAST
                 cout << endl;
             }
@@ -190,10 +188,9 @@ int main() {
 
             // Virtual destructor demo
             cout << "\nVirtual destructor test:\n";
-            auto tmp = tensor::make_tensor<float>({1}, true);
-            *tmp->getDataPtr() = 1.0f;
-            *(const_cast<NDArray<float>*>(tmp->getGrad())) = 0.1f;
-            vector<tensor::TensorSharedVariant> tmp_params = {tmp};
+            Tensor<float> tmp = tensor::ones<float>({1}, true);
+            *tmp.getGradPtr() = 0.1f;
+            vector<tensor::TensorSharedVariant> tmp_params = {tmp.shared()};
 
             Optimizer* ptr = new Adam(tmp_params, 0.001f, 0.0f, 0.9f, 0.999f);
             delete ptr;  // virtual destructor asigura cleanup corect
@@ -261,38 +258,33 @@ int main() {
             cout << "\n--- Demo Training ---\n";
             cout << "Minimizam f(x) = (x - 3)^2, start x = 10\n\n";
 
-            auto x = tensor::make_tensor<float>({1}, true);
-            (*x->getDataPtr())[{0}] = 10.0f;
+            Tensor<float> x = tensor::zeros<float>({1}, true);
+            x.data()[{0}] = 10.0f;
 
-            auto target = tensor::make_tensor<float>({1}, false);
-            (*target->getDataPtr())[{0}] = 3.0f;
+            Tensor<float> target = tensor::zeros<float>({1}, false);
+            target.data()[{0}] = 3.0f;
 
-            vector<tensor::TensorSharedVariant> params = {x};
-            Adam optimizer(params, 0.5f, 0.0f, 0.9f, 0.999f);
+            vector<tensor::TensorSharedVariant> params = {x.shared()};
+            Adam optimizer(params, 0.3f, 0.0f, 0.9f, 0.999f);
 
             for (int step = 0; step < 30; step++) {
                 optimizer.zeroGrad();
 
                 // Forward: loss = (x - target)^2
-                auto sub = functions::sub();
-                auto mul = functions::mul();
+                auto diff = x - target;
+                auto loss = diff * diff;
 
-                auto diff = sub->operator()<Tensor<float>>({x, target}, sub);
-                auto loss = mul->operator()<Tensor<float>>({diff, diff}, mul);
-
-                float loss_val = loss->getData()[{0}];
-
-                loss->backward();
-                optimizer.step();
-
+                float loss_val = loss.data()[{0}];
                 if (step % 5 == 0) {
-                    cout << "Step " << step << ": x = " << x->getData()[{0}]
+                    cout << "Step " << step << ": x = " << x.data()[{0}]
                          << ", loss = " << loss_val << endl;
                 }
+                loss.backward();
+                optimizer.step();
 
                 // No manual delete needed - shared_ptr handles cleanup
             }
-            cout << "\nFinal: x = " << x->getData()[{0}] << " (target: 3.0)\n";
+            cout << "\nFinal: x = " << x.data()[{0}] << " (target: 3.0)\n";
             break;
         }
 

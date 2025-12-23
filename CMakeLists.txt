@@ -4,6 +4,8 @@ project(ArrC CUDA CXX)
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CXX_STANDARD 20)
 
+find_package(CUDAToolkit REQUIRED)
+
 add_executable(ArrC
         # Main entry point
         main.cu
@@ -36,6 +38,8 @@ set_target_properties(ArrC PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
+
+target_link_libraries(ArrC PRIVATE CUDA::cudart)
 
 target_include_directories(ArrC PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include

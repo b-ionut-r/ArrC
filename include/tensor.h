@@ -14,14 +14,14 @@
 #include <variant>
 
 // Forward declarations
-template <typename dtype> class Tensor;
+template <typename dtype> class TensorPtr;
 template <typename dtype>
-void buildTopo(Tensor<dtype> *tensor, std::vector<Tensor<dtype>*> &topoOrder,
-               std::unordered_set<Tensor<dtype>*> &visited);
+void buildTopo(TensorPtr<dtype> *tensor, std::vector<TensorPtr<dtype>*> &topoOrder,
+               std::unordered_set<TensorPtr<dtype>*> &visited);
 class Function;
 
 template <typename dtype>
-class Tensor{
+class TensorPtr{
 private:
     static size_t idGenerator;
     size_t id;
@@ -31,27 +31,29 @@ private:
     bool requiresGrad;
 
     // Friend declarations for autograd system
-    friend void buildTopo<dtype>(Tensor<dtype>*, std::vector<Tensor<dtype>*>&,
-                                  std::unordered_set<Tensor<dtype>*>&);
+    friend void buildTopo<dtype>(TensorPtr<dtype>*, std::vector<TensorPtr<dtype>*>&,
+                                  std::unordered_set<TensorPtr<dtype>*>&);
     friend class Function;
 public:
     using value_type = dtype;
     // Constructor taking unique_ptr (preferred)
-    Tensor(std::unique_ptr<NDArray<dtype>> data, const bool &requiresGrad = false, std::shared_ptr<Function> gradFn = nullptr):
+    TensorPtr(std::unique_ptr<NDArray<dtype>> data, const bool &requiresGrad = false, std::shared_ptr<Function> gradFn = nullptr):
     data(std::move(data)), requiresGrad(requiresGrad), gradFn(std::move(gradFn)), id(idGenerator++) {
         if (requiresGrad){
             grad = std::make_unique<NDArray<dtype>>(this->data->getShape());
             *grad = (dtype)0;
         }
     }
+    TensorPtr(const std::vector<int> &shape, const bool &requiresGrad = false):
+    TensorPtr(std::make_unique<NDArray<dtype>>(shape), requiresGrad) {}
     // Legacy constructor taking raw pointer (wraps in unique_ptr)
-    Tensor(NDArray<dtype> *data, const bool &requiresGrad = false, std::shared_ptr<Function> gradFn = nullptr):
-    Tensor(std::unique_ptr<NDArray<dtype>>(data), requiresGrad, std::move(gradFn)) {}
-    Tensor(const Tensor&) = delete;
-    Tensor& operator=(const Tensor&) = delete;
-    Tensor(Tensor&& other) noexcept;
-    Tensor& operator=(Tensor&& other) noexcept;
-    ~Tensor() = default;  // shared_ptr handles gradFn cleanup automatically
+    TensorPtr(NDArray<dtype> *data, const bool &requiresGrad = false, std::shared_ptr<Function> gradFn = nullptr):
+    TensorPtr(std::unique_ptr<NDArray<dtype>>(data), requiresGrad, std::move(gradFn)) {}
+    TensorPtr(const TensorPtr&) = delete;
+    TensorPtr& operator=(const TensorPtr&) = delete;
+    TensorPtr(TensorPtr&& other) noexcept;
+    TensorPtr& operator=(TensorPtr&& other) noexcept;
+    ~TensorPtr() = default;  // shared_ptr handles gradFn cleanup automatically
     NDArray<dtype>* getDataPtr() const {return data.get();}
     NDArray<dtype>* getGradPtr() const {return grad.get();}
     NDArray<dtype> getData() const {return *data;}
@@ -73,14 +75,14 @@ public:
                   const bool retainGraph = false,
                   const int preserveAncestors = 4);
     template <typename newDtype>
-    Tensor<newDtype> cast() const;
+    TensorPtr<newDtype> cast() const;
 };
 
 template <typename dtype>
-size_t Tensor<dtype>::idGenerator = 0;
+size_t TensorPtr<dtype>::idGenerator = 0;
 
 template <typename dtype>
-Tensor<dtype>::Tensor(Tensor&& other) noexcept
+TensorPtr<dtype>::TensorPtr(TensorPtr&& other) noexcept
     : id(other.id),
       data(std::move(other.data)),
       grad(std::move(other.grad)),
@@ -90,7 +92,7 @@ Tensor<dtype>::Tensor(Tensor&& other) noexcept
 }
 
 template <typename dtype>
-Tensor<dtype>& Tensor<dtype>::operator=(Tensor&& other) noexcept {
+TensorPtr<dtype>& TensorPtr<dtype>::operator=(TensorPtr&& other) noexcept {
     if (this != &other) {
         // Transfer ownership - shared_ptr handles cleanup automatically
         data = std::move(other.data);
@@ -105,8 +107,8 @@ Tensor<dtype>& Tensor<dtype>::operator=(Tensor&& other) noexcept {
 
 
 template <typename dtype>
-void buildTopo(Tensor<dtype> *tensor, std::vector<Tensor<dtype>*> &topoOrder,
-                std::unordered_set<Tensor<dtype>*> &visited) {
+void buildTopo(TensorPtr<dtype> *tensor, std::vector<TensorPtr<dtype>*> &topoOrder,
+                std::unordered_set<TensorPtr<dtype>*> &visited) {
     if (tensor == nullptr || visited.find(tensor) != visited.end()) {
         return;
     }
@@ -133,7 +135,7 @@ void buildTopo(Tensor<dtype> *tensor, std::vector<Tensor<dtype>*> &topoOrder,
 }
 
 template <typename dtype>
-void Tensor<dtype>::backward(NDArray<dtype> *grad,
+void TensorPtr<dtype>::backward(NDArray<dtype> *grad,
                              const bool retainGraph,
                              const int preserveAncestors) {
     bool deleteGrad = false;
@@ -154,12 +156,12 @@ void Tensor<dtype>::backward(NDArray<dtype> *grad,
     *(this->grad) = *grad;
 
     // Build computational graph using topological sort
-    auto topoOrder = std::vector<Tensor<dtype>*>();
-    auto visited = std::unordered_set<Tensor<dtype>*>();
+    auto topoOrder = std::vector<TensorPtr<dtype>*>();
+    auto visited = std::unordered_set<TensorPtr<dtype>*>();
     buildTopo(this, topoOrder, visited);
 
     // Build set of nodes to preserve (the most recent N in topo order)
-    std::unordered_set<Tensor<dtype>*> nodesToPreserve;
+    std::unordered_set<TensorPtr<dtype>*> nodesToPreserve;
     size_t toPreserve = std::min(static_cast<size_t>(preserveAncestors), topoOrder.size());
     for (size_t i = topoOrder.size() - toPreserve; i < topoOrder.size(); i++) {
         nodesToPreserve.insert(topoOrder[i]);
@@ -170,7 +172,7 @@ void Tensor<dtype>::backward(NDArray<dtype> *grad,
 
 
     for (auto it = topoOrder.rbegin(); it != topoOrder.rend(); ++it) {
-        Tensor<dtype> *tensor = *it;
+        TensorPtr<dtype> *tensor = *it;
         if (tensor->gradFn == nullptr) continue;
 
         auto* gradOutput = tensor->grad.get();
@@ -228,16 +230,13 @@ void Tensor<dtype>::backward(NDArray<dtype> *grad,
             }
         }
     }
-
-    // No separate cleanup phase needed - shared_ptr handles deletion when reset()
-
     if (deleteGrad) delete grad;
 }
 
 
 template <typename dtype>
 template <typename newDtype>
-Tensor<newDtype> Tensor<dtype>::cast() const {
+TensorPtr<newDtype> TensorPtr<dtype>::cast() const {
     // Allocate new data with casted values (unique_ptr for exception safety)
     auto new_data = std::make_unique<NDArray<newDtype>>(data->template cast<newDtype>());
 
@@ -247,7 +246,7 @@ Tensor<newDtype> Tensor<dtype>::cast() const {
     }
 
     // Create tensor - it will allocate its own grad if requiresGrad
-    auto t = Tensor<newDtype>(std::move(new_data), requiresGrad);
+    auto t = TensorPtr<newDtype>(std::move(new_data), requiresGrad);
 
     // Replace the auto-allocated grad with our casted one
     if (new_grad) {
@@ -255,57 +254,112 @@ Tensor<newDtype> Tensor<dtype>::cast() const {
     }
     return t;
 }
+template <typename dtype>
+class Tensor {
+private:
+    std::shared_ptr<TensorPtr<dtype>> impl;
+public:
+    using value_type = dtype;
+    Tensor() = default;
+    Tensor(std::shared_ptr<TensorPtr<dtype>> impl): impl(std::move(impl)) {}
+    Tensor(const std::vector<int> &shape, const bool &requiresGrad = false):
+        impl(std::make_shared<TensorPtr<dtype>>(std::make_unique<NDArray<dtype>>(shape), requiresGrad)) {}
+    Tensor(std::unique_ptr<NDArray<dtype>> data, const bool &requiresGrad = false):
+        impl(std::make_shared<TensorPtr<dtype>>(std::move(data), requiresGrad)) {}
 
+    bool defined() const { return static_cast<bool>(impl); }
+    explicit operator bool() const { return static_cast<bool>(impl); }
+    const std::shared_ptr<TensorPtr<dtype>>& shared() const { return impl; }
+    TensorPtr<dtype>* get() const { return impl.get(); }
+    TensorPtr<dtype>* operator->() const { return impl.get(); }
 
+    NDArray<dtype>* getDataPtr() const { return impl->getDataPtr(); }
+    NDArray<dtype>* getGradPtr() const { return impl->getGradPtr(); }
+    NDArray<dtype> getData() const { return impl->getData(); }
+    const NDArray<dtype>* getGrad() const { return impl->getGrad(); }
+    bool getRequiresGrad() const { return impl->getRequiresGrad(); }
+    std::string getName() const { return impl->getName(); }
+    int getSize() const { return impl->getSize(); }
+    vector<int> getShape() const { return impl->getShape(); }
+    void zeroGrad() { if (impl) impl->zeroGrad(); }
+    void backward(NDArray<dtype> *grad = nullptr,
+                  const bool retainGraph = false,
+                  const int preserveAncestors = 4) {
+        impl->backward(grad, retainGraph, preserveAncestors);
+    }
+    NDArray<dtype>& data() { return *impl->getDataPtr(); }
+    const NDArray<dtype>& data() const { return *impl->getDataPtr(); }
+    NDArray<dtype>* grad() const { return impl ? impl->getGradPtr() : nullptr; }
+
+    template <typename newDtype>
+    Tensor<newDtype> cast() const {
+        auto casted = impl->template cast<newDtype>();
+        return Tensor<newDtype>(std::make_shared<TensorPtr<newDtype>>(std::move(casted)));
+    }
+};
 
 namespace tensor {
     // TensorSharedVariant for passing tensor shared_ptr (inputs to functions)
     using TensorSharedVariant = std::variant<
-        std::shared_ptr<Tensor<int32_t>>,
-        std::shared_ptr<Tensor<int64_t>>,
-        std::shared_ptr<Tensor<size_t>>,
-        std::shared_ptr<Tensor<float>>,
-        std::shared_ptr<Tensor<double>>,
-        std::shared_ptr<Tensor<__half>>,
-        std::shared_ptr<Tensor<__nv_bfloat16>>,
-        std::shared_ptr<Tensor<bool>>
+        std::shared_ptr<TensorPtr<int32_t>>,
+        std::shared_ptr<TensorPtr<int64_t>>,
+        std::shared_ptr<TensorPtr<size_t>>,
+        std::shared_ptr<TensorPtr<float>>,
+        std::shared_ptr<TensorPtr<double>>,
+        std::shared_ptr<TensorPtr<__half>>,
+        std::shared_ptr<TensorPtr<__nv_bfloat16>>,
+        std::shared_ptr<TensorPtr<bool>>
     >;
 
     // TensorWeakVariant for storing weak references (in Function::parent_tensors)
     using TensorWeakVariant = std::variant<
-        std::weak_ptr<Tensor<int32_t>>,
-        std::weak_ptr<Tensor<int64_t>>,
-        std::weak_ptr<Tensor<size_t>>,
-        std::weak_ptr<Tensor<float>>,
-        std::weak_ptr<Tensor<double>>,
-        std::weak_ptr<Tensor<__half>>,
-        std::weak_ptr<Tensor<__nv_bfloat16>>,
-        std::weak_ptr<Tensor<bool>>
+        std::weak_ptr<TensorPtr<int32_t>>,
+        std::weak_ptr<TensorPtr<int64_t>>,
+        std::weak_ptr<TensorPtr<size_t>>,
+        std::weak_ptr<TensorPtr<float>>,
+        std::weak_ptr<TensorPtr<double>>,
+        std::weak_ptr<TensorPtr<__half>>,
+        std::weak_ptr<TensorPtr<__nv_bfloat16>>,
+        std::weak_ptr<TensorPtr<bool>>
     >;
 
     // Legacy TensorPtrVariant (kept for backward compatibility during transition)
     using TensorPtrVariant = std::variant<
-        Tensor<int32_t>*,
-        Tensor<int64_t>*,
-        Tensor<size_t>*,
-        Tensor<float>*,
-        Tensor<double>*,
-        Tensor<__half>*,
-        Tensor<__nv_bfloat16>*,
-        Tensor<bool>*
+        TensorPtr<int32_t>*,
+        TensorPtr<int64_t>*,
+        TensorPtr<size_t>*,
+        TensorPtr<float>*,
+        TensorPtr<double>*,
+        TensorPtr<__half>*,
+        TensorPtr<__nv_bfloat16>*,
+        TensorPtr<bool>*
     >;
 
     // Helper function to create tensors with shared_ptr
     template<typename dtype>
-    std::shared_ptr<Tensor<dtype>> make_tensor(const std::vector<int>& shape, bool requiresGrad = false) {
-        return std::make_shared<Tensor<dtype>>(
+    std::shared_ptr<TensorPtr<dtype>> make_tensor(const std::vector<int>& shape, bool requiresGrad = false) {
+        return std::make_shared<TensorPtr<dtype>>(
             std::make_unique<NDArray<dtype>>(shape), requiresGrad);
     }
 
     // Helper to create tensor from existing NDArray
     template<typename dtype>
-    std::shared_ptr<Tensor<dtype>> make_tensor(std::unique_ptr<NDArray<dtype>> data, bool requiresGrad = false) {
-        return std::make_shared<Tensor<dtype>>(std::move(data), requiresGrad);
+    std::shared_ptr<TensorPtr<dtype>> make_tensor(std::unique_ptr<NDArray<dtype>> data, bool requiresGrad = false) {
+        return std::make_shared<TensorPtr<dtype>>(std::move(data), requiresGrad);
+    }
+
+    template<typename dtype>
+    ::Tensor<dtype> zeros(const std::vector<int>& shape, bool requiresGrad = false) {
+        auto t = make_tensor<dtype>(shape, requiresGrad);
+        *t->getDataPtr() = static_cast<dtype>(0);
+        return ::Tensor<dtype>(std::move(t));
+    }
+
+    template<typename dtype>
+    ::Tensor<dtype> ones(const std::vector<int>& shape, bool requiresGrad = false) {
+        auto t = make_tensor<dtype>(shape, requiresGrad);
+        *t->getDataPtr() = static_cast<dtype>(1);
+        return ::Tensor<dtype>(std::move(t));
     }
 }
 

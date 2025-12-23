@@ -459,12 +459,13 @@ NDArray<dtype> operator+(dtype value, const NDArray<dtype> &arr) {
 
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator-() const {
-    return executeElementWise(ScalarMulOp<dtype>{-1}, nullptr, nullptr);
+    return executeElementWise(ScalarMulOp<dtype>{static_cast<dtype>(-1)}, nullptr, nullptr);
 }
 
 template <typename dtype>
 NDArray<dtype> NDArray<dtype>::operator-(const NDArray<dtype> &other) const {
-    return executeElementWise(AffineAddOp<dtype>{1, -1}, &other, nullptr);
+    return executeElementWise(AffineAddOp<dtype>{static_cast<dtype>(1), static_cast<dtype>(-1)},
+                              &other, nullptr);
 }
 
 template <typename dtype>
