@@ -603,7 +603,7 @@ namespace arr {
         NDArray<bool>
     >;
     using NDArrayPtrVariant = std::variant<
-        NDArray<int>,
+        NDArray<int>*,
         NDArray<int32_t>*,
         NDArray<int64_t>*,
         NDArray<size_t>*,

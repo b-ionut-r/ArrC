@@ -29,6 +29,10 @@ public:
             *grad = (dtype)0;
         }
     }
+    Tensor(const Tensor&) = delete;
+    Tensor& operator=(const Tensor&) = delete;
+    Tensor(Tensor&& other) noexcept;
+    Tensor& operator=(Tensor&& other) noexcept;
     ~Tensor(){
         delete data;
         if (requiresGrad) delete grad;
@@ -51,6 +55,38 @@ public:
 
 template <typename dtype>
 size_t Tensor<dtype>::idGenerator = 0;
+
+template <typename dtype>
+Tensor<dtype>::Tensor(Tensor&& other) noexcept
+    : id(other.id),
+      data(other.data),
+      grad(other.grad),
+      gradFn(other.gradFn),
+      requiresGrad(other.requiresGrad) {
+    idGenerator++;
+    other.data = nullptr;
+    other.grad = nullptr;
+    other.gradFn = nullptr;
+    other.requiresGrad = false;
+}
+
+template <typename dtype>
+Tensor<dtype>& Tensor<dtype>::operator=(Tensor&& other) noexcept {
+    if (this != &other) {
+        delete data;
+        if (requiresGrad) delete grad;
+        data = other.data;
+        grad = other.grad;
+        gradFn = other.gradFn;
+        requiresGrad = other.requiresGrad;
+        id = other.id;
+        other.data = nullptr;
+        other.grad = nullptr;
+        other.gradFn = nullptr;
+        other.requiresGrad = false;
+    }
+    return *this;
+}
 
 
 template <typename dtype>
@@ -141,7 +177,10 @@ Tensor<newDtype> Tensor<dtype>::cast() const {
         new NDArray<newDtype>(data->template cast<newDtype>()),
         requiresGrad
     );
-    if (requiresGrad) t.grad = new NDArray<newDtype>(grad->template cast<newDtype>());
+    if (requiresGrad) {
+        delete t.grad;
+        t.grad = new NDArray<newDtype>(grad->template cast<newDtype>());
+    }
     return t;
 }
 
@@ -159,7 +198,7 @@ namespace tensor {
         NDArray<bool>
     >;
     using TensorPtrVariant = std::variant<
-        NDArray<int>,
+        NDArray<int>*,
         NDArray<int32_t>*,
         NDArray<int64_t>*,
         NDArray<size_t>*,

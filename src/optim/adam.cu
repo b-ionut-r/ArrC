@@ -18,21 +18,31 @@ Adam::Adam(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
         const bool &adamW):
        Optimizer(params, lr, weightDecay, dtype),
        beta1(beta1),beta2(beta2), eps(eps), adamW(adamW) {
-    for (const auto &param : params) {
-        std::visit([&](auto param) {
-            using dtype = decltype(*param->data)::value_type;
-            auto mom = new NDArray<dtype>(param->getShape());
-            mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
-            firstMomentum.push_back(mom);
-        }, param);
-    }
-    for (const auto &param : params) {
-        std::visit([&](auto param) {
-            using dtype = decltype(*param->data)::value_type;
-            auto mom = new NDArray<dtype>(param->getShape());
-            mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
-            secondMomentum.push_back(mom);
-        }, param);
+    try {
+        for (const auto &param : params) {
+            std::visit([&](auto param) {
+                using dtype = decltype(*param->data)::value_type;
+                auto mom = new NDArray<dtype>(param->getShape());
+                mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
+                firstMomentum.push_back(mom);
+            }, param);
+        }
+        for (const auto &param : params) {
+            std::visit([&](auto param) {
+                using dtype = decltype(*param->data)::value_type;
+                auto mom = new NDArray<dtype>(param->getShape());
+                mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
+                secondMomentum.push_back(mom);
+            }, param);
+        }
+    } catch (...) {
+        for (auto &mom : firstMomentum)
+            std::visit([&](auto mom) { delete mom; }, mom);
+        for (auto &mom : secondMomentum)
+            std::visit([&](auto mom) { delete mom; }, mom);
+        firstMomentum.clear();
+        secondMomentum.clear();
+        throw;
     }
 };
 

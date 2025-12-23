@@ -15,13 +15,20 @@
 SGD::SGD(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype):
         Optimizer(params, lr, weightDecay, dtype), beta(beta) {
-    for (const auto &param : params) {
-        std::visit([&](auto param) {
-            using dtype = decltype(*param->data)::value_type;
-            auto mom = new NDArray<dtype>(param->getShape());
-            mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
-            momentum.push_back(mom);
-        }, param);
+    try {
+        for (const auto &param : params) {
+            std::visit([&](auto param) {
+                using dtype = decltype(*param->data)::value_type;
+                auto mom = new NDArray<dtype>(param->getShape());
+                mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
+                momentum.push_back(mom);
+            }, param);
+        }
+    } catch (...) {
+        for (auto &mom: momentum)
+            std::visit([&](auto mom) { delete mom; }, mom);
+        momentum.clear();
+        throw;
     }
 };
 
