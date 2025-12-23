@@ -282,6 +282,7 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
         first = this;
         second = other;
         result = final? final: new NDArray<dtype>(first->shape);
+        if(final == nullptr) delResult = true;
     } else {
         auto info = getBroadcastInfo(*this, *other);
         if (info.aBroadcastAxes.empty()) first = this;
@@ -524,7 +525,7 @@ struct BroadcastInfo {
 };
 
 template <typename dtype>
-BroadcastInfo<dtype> getBroadcastingDims(const NDArray<dtype> &a, const NDArray<dtype> &b) {
+BroadcastInfo<dtype> getBroadcastInfo(const NDArray<dtype> &a, const NDArray<dtype> &b) {
     BroadcastInfo<dtype> out;
     // Quick checks
     const int n = a.getNDim();
