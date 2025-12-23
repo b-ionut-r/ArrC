@@ -18,13 +18,13 @@ enum ComputeDType {
 
 class Optimizer {
 protected:
-    std::vector<TensorBase*>params;
+    std::vector<tensor::TensorPtrVariant>params;
     float lr;
     float weightDecay;
     size_t t = 0;
     ComputeDType dtype = FLOAT;
 public:
-    Optimizer(const std::vector<Tensor*> &params, const float &lr, const float &weightDecay,
+    Optimizer(const std::vector<tensor::TensorPtrVariant> &params, const float &lr, const float &weightDecay,
               const ComputeDType &dtype = FLOAT):
               params(params), lr(lr), weightDecay(weightDecay), dtype(dtype) {
     };
@@ -32,7 +32,7 @@ public:
     virtual void step() = 0;
     void zeroGrad() {
         for (auto &param: params)
-            param->zeroGrad();
+            std::visit([](auto t){t->zeroGrad();}, param);
     }
     float getLR() const {return lr;}
     float getWeightDecay() const {return weightDecay;}

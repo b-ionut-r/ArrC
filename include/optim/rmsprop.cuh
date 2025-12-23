@@ -11,9 +11,9 @@ class RMSProp: public Optimizer {
 private:
     float beta;
     double eps;
-    std::vector<NDArrayBase*> momentum;
+    std::vector<arr::NDArrayPtrVariant> momentum;
 public:
-    RMSProp(const std::vector<TensorBase*> &params, const float &lr,
+    RMSProp(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
                      const float &weightDecay, const float &beta,
                      const double &eps = 1e-8, const ComputeDType &dtype = FLOAT);
     ~RMSProp() override;

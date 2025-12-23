@@ -11,9 +11,9 @@
 class SGD: public Optimizer {
 private:
     float beta;
-    std::vector<NDArrayBase*> momentum;
+    std::vector<NDArrayPtrVariant> momentum;
 public:
-    SGD(const std::vector<TensorBase*> &params, const float &lr,
+    SGD(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype = FLOAT);
     ~SGD() override;
     void step() override;

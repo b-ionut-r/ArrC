@@ -16,8 +16,6 @@
 #include "exceptions.h"
 #include <cuda_fp16.h>
 
-#include "ndarray.cuh"
-
 
 /// FORWARD DECLARATIONS FOR OSTREAM
 template <typename dtype>
@@ -28,14 +26,9 @@ template <typename dtype>
 istream& operator>>(istream &is, NDArray<dtype> &arr);
 ///
 
-class NDArrayBase {
-public:
-    virtual ~NDArrayBase() = 0;
-};
-NDArrayBase::~NDArrayBase() {} // for std::vector of templated pointers
 
 template <typename dtype>
-class NDArray: public NDArrayBase{
+class NDArray{
 protected:
     dtype *data;
     vector<int> shape; int ndim; int size;
@@ -91,7 +84,6 @@ public:
     /// OVERLOADED OPERATORS
     dtype& operator[](const std::vector<int>& idx);
     NDArray operator[](vector<Slice> slices);
-    /* this, other, final */
     NDArray& operator=(const dtype &value);
     NDArray& operator=(const NDArray &other);
     NDArray operator+(const NDArray &other) const;
@@ -109,6 +101,8 @@ public:
     /// OTHERS
     template <typename newDtype>
     NDArray<newDtype> cast() const;
+    NDArray zeros_like() const;
+    NDArray ones_like() const;
 };
 
 template<typename dtype>
@@ -193,7 +187,10 @@ NDArray<dtype>::NDArray(const NDArray<dtype> &other):
 {
     N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
     _computeStrides();
-    cudaMallocManaged(&data, size * itemBytes);
+    cudaError_t err = cudaMallocManaged(&data, size * itemBytes);
+    if (err != cudaSuccess) {
+        throw CudaKernelException("OOM during NDArray allocation");
+    }
     totalAllocatedMemory += size * itemBytes;
     if (other.isContiguous() && other.offset == 0) {
         cudaMemcpy(data, other.data, size * itemBytes, cudaMemcpyDeviceToDevice);
@@ -289,7 +286,7 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
     const NDArray<dtype> *final) const
 {
     /* first, second result */
-    bool allContig = this->isContiguous() && other? other->isContiguous(): true;
+    bool allContig = this->isContiguous() && (other ? other->isContiguous() : true);
     /// HANDLE BROADCASTING
     NDArray<dtype> *result, *first, *second;
     bool delFirst = false, delSecond = false, delResult = false;
@@ -529,6 +526,26 @@ void NDArray<dtype>::allocateDeviceMetadata(int** dStrides, int** dShape) const 
     }
 }
 
+template <typename dtype>
+template <typename newDtype>
+NDArray<newDtype> NDArray<dtype>::cast() const {
+    return executeElementWise(CastOp<newDtype, dtype>{}, nullptr, nullptr);
+}
+
+
+template<typename dtype>
+NDArray<dtype> NDArray<dtype>::zeros_like() const {
+    NDArray<dtype> zeros(shape);
+    zeros = 0;
+    return zeros;
+}
+
+template<typename dtype>
+NDArray<dtype> NDArray<dtype>::ones_like() const {
+    NDArray<dtype> ones(shape);
+    ones = 1;
+    return ones;
+}
 
 
 /// BROADCASTING HELPERS ///
@@ -570,16 +587,32 @@ BroadcastInfo<dtype> getBroadcastInfo(const NDArray<dtype> &a, const NDArray<dty
     return out;
 }
 
-
-template <typename dtype>
-template <typename newDtype>
-NDArray<newDtype> NDArray<dtype>::cast() const {
-    return executeElementWise(CastOp<newDtype, dtype>{}, nullptr, nullptr);
-}
+/// VARIANTS
 
 namespace arr {
     template <typename dtype>
     using NDArray = NDArray<dtype>;
+    using NDArrayVariant = std::variant<
+        NDArray<int32_t>,
+        NDArray<int64_t>,
+        NDArray<size_t>,
+        NDArray<float>,
+        NDArray<double>,
+        NDArray<__half>,
+        NDArray<__nv_bfloat16>,
+        NDArray<bool>
+    >;
+    using NDArrayPtrVariant = std::variant<
+        NDArray<int>,
+        NDArray<int32_t>*,
+        NDArray<int64_t>*,
+        NDArray<size_t>*,
+        NDArray<float>*,
+        NDArray<double>*,
+        NDArray<__half>*,
+        NDArray<__nv_bfloat16>*,
+        NDArray<bool>*
+    >;
 
     template <typename dtype>
     NDArray<dtype> make_constant(const vector<int> &shape, const dtype &value) {
@@ -597,6 +630,8 @@ namespace arr {
         return make_constant(shape, (dtype)1);
     }
 }
+
+
 
 
 #endif //ARRC_NDARRAY_H

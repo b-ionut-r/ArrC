@@ -10,60 +10,61 @@
 #include "ndarray.cuh"
 #include "tensor.h"
 #include "utils.h"
-#include <cuda_fp16.h>
 
 
-SGD::SGD(const std::vector<TensorBase*> &params, const float &lr,
+SGD::SGD(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype):
         Optimizer(params, lr, weightDecay, dtype), beta(beta) {
-    for (int i = 0; i < params.size(); i++) {
-        using dtype = typename decltype(*params[i]->data)::value_type;
-        NDArray<dtype> *mom = new NDArray<dtype>(params[i]->getShape());
-        mom->executeElementWise(SetConstantOp<dtype>{(dtype)0}, nullptr, mom);
-        momentum.push_back(mom);
+    for (const auto &param : params) {
+        std::visit([&](auto param) {
+            using dtype = decltype(*param->data)::value_type;
+            auto mom = new NDArray<dtype>(param->getShape());
+            mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
+            momentum.push_back(mom);
+        }, param);
     }
 };
 
 SGD::~SGD() override {
     for (auto &mom: momentum) {
-        delete mom;
+        std::visit([&](auto mom) {delete mom;}, mom);
     }
     momentum.clear();
 };
 
 void SGD::step() {
     for (size_t i = 0; i < params.size(); i++) {
-        auto *param = params[i]; // TensorBase*
-        auto *mom = momentum[i]; // NDArrayBase*
-        if (param->requiresGrad() && param->getGrad() != nullptr) {
-            int NThreads = 256;
-            int NBlocks = getNBlocks(param->getSize(), NThreads);
-            // Lambda function
-            auto run = [&](auto dummy) {
-                using CompT = decltype(dummy);
-                fusedSGDKernel<CompT><<<NBlocks, NThreads>>>(
-                    param->getSize(),
-                    param->getData()->getData(),
-                    param->getGrad()->getData(),
-                    mom,
-                    lr,
-                    weightDecay,
-                    beta
-                );
-                // Syncronize and check errors
-                cudaDeviceSynchronize();
-                cudaError_t err = cudaGetLastError();
-                if (err != cudaSuccess) {
-                    throw CudaKernelException(cudaGetErrorString(err));
-                }
-            };
-            switch (dtype) {
-                case HALF: run(__half(0)); break;
-                case FLOAT: run(float(0)); break;
-                case DOUBLE: run(double(0)); break;
-            }
+        auto run = [&](auto dummy) {
+            using dtype = decltype(dummy);
+            std::visit([&](auto param, auto mom) {
+                if (param->requiresGrad() && param->getGrad() != nullptr) {
+                    int NThreads = 256;
+                    int NBlocks = getNBlocks(param->getSize(), NThreads);
+
+                    fusedSGDKernel<dtype><<<NBlocks, NThreads>>>(
+                        param->getSize(),
+                        param->getData()->getData(),
+                        param->getGrad()->getData(),
+                        mom->getData(),
+                        lr,
+                        weightDecay,
+                        beta
+                    );
+                };
+            }, params[i], momentum[i]);
         };
+        switch (dtype) {
+            case HALF: run(__half(0)); break;
+            case FLOAT: run (float{0}); break;
+            case DOUBLE: run(double{0}); break;
+        }
     };
+    // Syncronize and check errors once per step
+    cudaDeviceSynchronize();
+    auto err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw CudaKernelException(cudaGetErrorString(err));
+    }
     t++;
 }
 

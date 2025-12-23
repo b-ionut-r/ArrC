@@ -11,14 +11,8 @@
 #include <unordered_set>
 
 
-class TensorBase{
-public:
-    TensorBase() = default;
-    virtual ~TensorBase() = 0;
-};
-
 template <typename dtype>
-class Tensor: public TensorBase{
+class Tensor{
 private:
     static size_t idGenerator;
     size_t id;
@@ -30,9 +24,10 @@ public:
     using value_type = dtype;
     Tensor(NDArray<dtype> *data, const bool &requiresGrad = false):
     data(data), requiresGrad(requiresGrad), id(idGenerator++) {
-        if (requiresGrad)
+        if (requiresGrad){
             grad = new NDArray<dtype>(data->getShape());
             *grad = (dtype)0;
+        }
     }
     ~Tensor(){
         delete data;
@@ -107,15 +102,18 @@ void Tensor<dtype>::backward(NDArray<dtype> *grad,
         for (int i = 0; i < parentGrads.size(); i++) {
            Tensor *parentTensor = tensor->gradFn->parents[i];
            NDArray<dtype> *parentGrad = parentGrads[i];
-           if (parentTensor->requiresGrad() && parentGrad != nullptr) {
-               if (parentTensor->grad == nullptr) {
-                   parentTensor->grad = parentGrad;
-               }
-               else {
-                   parentTensor->grad->executeElementWise(AffineAddOp<dtype>{1, 1},
-                       parentGrad, parentTensor->grad); // inplace accumulation
-               }
-           }
+            if (parentTensor->requiresGrad() && parentGrad != nullptr) {
+                if (parentTensor->grad == nullptr) {
+                    parentTensor->grad = parentGrad;
+                }
+                else {
+                    parentTensor->grad->executeElementWise(AffineAddOp<dtype>{1, 1},
+                        parentGrad, parentTensor->grad); // inplace accumulation
+                    delete parentGrad;
+                }
+            } else if (parentGrad != nullptr) {
+                delete parentGrad;
+            }
         }
         if (!retainGraph) {
             bool isLeaf = tensor->gradFn == nullptr;
@@ -147,5 +145,30 @@ Tensor<newDtype> Tensor<dtype>::cast() const {
     return t;
 }
 
+
+
+namespace tensor {
+    using TensorVariant = std::variant<
+        NDArray<int32_t>,
+        NDArray<int64_t>,
+        NDArray<size_t>,
+        NDArray<float>,
+        NDArray<double>,
+        NDArray<__half>,
+        NDArray<__nv_bfloat16>,
+        NDArray<bool>
+    >;
+    using TensorPtrVariant = std::variant<
+        NDArray<int>,
+        NDArray<int32_t>*,
+        NDArray<int64_t>*,
+        NDArray<size_t>*,
+        NDArray<float>*,
+        NDArray<double>*,
+        NDArray<__half>*,
+        NDArray<__nv_bfloat16>*,
+        NDArray<bool>*
+    >;
+}
 
 #endif //ARRC_TENSOR_H

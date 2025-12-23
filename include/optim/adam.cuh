@@ -9,16 +9,18 @@
 #include "optimizer.h"
 #include "tensor.h"
 #include "ndarray.cuh"
+#include "tensor.h"
+#include <any>
 
 class Adam: public Optimizer {
 private:
     float beta1, beta2;
     double eps;
     bool adamW;
-    std::vector<NDArrayBase*> firstMomentum;
-    std::vector<NDArrayBase*> secondMomentum;
+    std::vector<arr::NDArrayPtrVariant> firstMomentum;
+    std::vector<arr::NDArrayPtrVariant> secondMomentum;
 public:
-    Adam(const std::vector<TensorBase*> &params, const float &lr,
+    Adam(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
          const float &weightDecay, const float &beta1, const float &beta2,
          const double &eps = 1e-8, const ComputeDType &dtype = FLOAT,
          const bool &adamW = false);
