@@ -20,9 +20,9 @@ RMSProp::RMSProp(const std::vector<tensor::TensorPtrVariant> &params, const floa
     try {
         for (const auto &param: params) {
             std::visit([&](auto param) {
-                using dtype = decltype(*param->data)::value_type;
-                auto mom = new NDArray<dtype>(param->getShape());
-                mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
+                using param_dtype = typename std::decay_t<decltype(*param)>::value_type;
+                auto mom = new NDArray<param_dtype>(param->getShape());
+                mom->executeElementWise(SetConstantOp<param_dtype>{static_cast<param_dtype>(0)}, nullptr, mom);
                 momentum.push_back(mom);
             }, param);
         }
@@ -34,7 +34,7 @@ RMSProp::RMSProp(const std::vector<tensor::TensorPtrVariant> &params, const floa
     }
 };
 
-RMSProp::~RMSProp() override {
+RMSProp::~RMSProp() {
     for (auto &mom: momentum) {
         std::visit([&](auto mom){delete mom;}, mom);
     }
@@ -46,14 +46,14 @@ void RMSProp::step() {
         auto run = [&](auto dummy) {
             using dtype = decltype(dummy);
             std::visit([&](auto param, auto mom) {
-                if (param->requiresGrad() && param->getGrad() != nullptr) {
+                if (param->requiresGrad && param->getGradPtr() != nullptr) {
                     int NThreads = 256;
                     int NBlocks = getNBlocks(param->getSize(), NThreads);
                     fusedRMSPropKernel<dtype><<<NBlocks, NThreads>>>(
                         param->getSize(),
-                        param->getData()->getData(),
-                        param->getGrad()->getData(),
-                        mom,
+                        param->getDataPtr()->getData(),
+                        param->getGradPtr()->getData(),
+                        mom->getData(),
                         lr,
                         weightDecay,
                         beta,

@@ -58,6 +58,7 @@ public:
     NDArray(const NDArray<dtype> &other); // copy constructor
     NDArray(NDArray<dtype> &&other) noexcept; /* move constructor
     for returned rvalues views of ndarray. */
+    NDArray& operator=(NDArray<dtype> &&other) noexcept; // move assignment
     ~NDArray();
 
     /// GETTERS and SETTERS (inline)
@@ -182,7 +183,7 @@ NDArray<dtype>::NDArray(dtype *data, const vector<int> &shape, const int &offset
 template<typename dtype>
 NDArray<dtype>::NDArray(const NDArray<dtype> &other):
     shape(other.shape), ndim(other.ndim), size(other.size),
-    strides(other.ndim), itemBytes(sizeof(dtype)),
+    strides(other.strides), itemBytes(sizeof(dtype)),
     offset(0), ownsData(true), id(++idGenerator)
 {
     N_BLOCKS = (size + N_THREADS - 1) / N_THREADS;
@@ -213,13 +214,46 @@ NDArray<dtype>::NDArray(NDArray<dtype> &&other) noexcept:
 {
     other.data = nullptr;
     other.ownsData = false;
+    other.ndim = 0;
+    other.size = 0;
+    other.offset = 0;
+    other.N_BLOCKS = 0;
 }
 
+template<typename dtype>
+NDArray<dtype>& NDArray<dtype>::operator=(NDArray<dtype> &&other) noexcept {
+    if (this != &other) {
+        // Free existing resources
+        if (ownsData && data != nullptr) {
+            cudaFree(data);
+            totalAllocatedMemory -= size * itemBytes;
+        }
+        // Transfer ownership
+        data = other.data;
+        shape = move(other.shape);
+        ndim = other.ndim;
+        size = other.size;
+        strides = move(other.strides);
+        itemBytes = other.itemBytes;
+        offset = other.offset;
+        ownsData = other.ownsData;
+        N_BLOCKS = other.N_BLOCKS;
+        id = other.id;
+        // Nullify source
+        other.data = nullptr;
+        other.ownsData = false;
+        other.ndim = 0;
+        other.size = 0;
+        other.offset = 0;
+        other.N_BLOCKS = 0;
+    }
+    return *this;
+}
 
 template<typename dtype>
 NDArray<dtype>::~NDArray() {
     shape.clear(); strides.clear();
-    if (ownsData) {
+    if (ownsData && data != nullptr) {
         cudaFree(data);
         totalAllocatedMemory -= size * itemBytes;
     }
@@ -318,39 +352,62 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
         result = new NDArray<dtype>(info.finalShape);
         delResult = true;
     }
-    if (allContig) {
-        elementWiseKernelContiguous<<<N_BLOCKS, N_THREADS>>>(
-            result->data, result->offset, result->size,
-            op,
-            first->data, first->offset,
-            second ? second->data : nullptr, second ? second->offset : 0
-        );
-        cudaDeviceSynchronize();
-    } else {
-        int *dResultShape;
-        int *dResultStrides, *dFirstStrides, *dSecondStrides = nullptr;
-        result->allocateDeviceMetadata(&dResultStrides, &dResultShape);
-        first->allocateDeviceMetadata(&dFirstStrides, nullptr);
-        if (second) second->allocateDeviceMetadata(&dSecondStrides, nullptr);
-        elementWiseKernelStrided<<<N_BLOCKS, N_THREADS>>>(
-            result->data, result->offset, dResultStrides,
-            result->size, result->ndim, dResultShape,
-            op,
-            first->data, first->offset, dFirstStrides,
-            second ? second->data : nullptr, second ? second->offset : 0, dSecondStrides
-        );
-        cudaDeviceSynchronize();
-        cudaFreeMulti({dResultShape, dResultStrides, dFirstStrides}); // avoid memory leak
-        if (second) cudaFree(dSecondStrides);
+    cudaError_t err = cudaSuccess;
+
+    try {
+        if (allContig) {
+            elementWiseKernelContiguous<<<N_BLOCKS, N_THREADS>>>(
+                result->data, result->offset, result->size,
+                op,
+                first->data, first->offset,
+                second ? second->data : nullptr, second ? second->offset : 0
+            );
+            cudaDeviceSynchronize();
+        } else {
+            int *dResultShape = nullptr;
+            int *dResultStrides = nullptr, *dFirstStrides = nullptr, *dSecondStrides = nullptr;
+
+            try {
+                result->allocateDeviceMetadata(&dResultStrides, &dResultShape);
+                first->allocateDeviceMetadata(&dFirstStrides, nullptr);
+                if (second) second->allocateDeviceMetadata(&dSecondStrides, nullptr);
+
+                elementWiseKernelStrided<<<N_BLOCKS, N_THREADS>>>(
+                    result->data, result->offset, dResultStrides,
+                    result->size, result->ndim, dResultShape,
+                    op,
+                    first->data, first->offset, dFirstStrides,
+                    second ? second->data : nullptr, second ? second->offset : 0, dSecondStrides
+                );
+                cudaDeviceSynchronize();
+            } catch (...) {
+                // Clean up device memory on exception
+                if (dResultShape) cudaFree(dResultShape);
+                if (dResultStrides) cudaFree(dResultStrides);
+                if (dFirstStrides) cudaFree(dFirstStrides);
+                if (dSecondStrides) cudaFree(dSecondStrides);
+                throw;
+            }
+
+            cudaFreeMulti({dResultShape, dResultStrides, dFirstStrides});
+            if (second) cudaFree(dSecondStrides);
+        }
+
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw CudaKernelException(cudaGetErrorString(err));
+        }
+    } catch (...) {
+        // Clean up temporary objects on any exception
+        if (delFirst) delete first;
+        if (delSecond) delete second;
+        if (delResult) delete result;
+        throw;
     }
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
+
+    // Normal cleanup
     if (delFirst) delete first;
     if (delSecond) delete second;
-    if (err != cudaSuccess) {
-        if (delResult) delete result;
-        throw CudaKernelException(cudaGetErrorString(err));
-    }
     if (delResult) {
         NDArray retVal = std::move(*result);
         delete result;

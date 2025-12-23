@@ -12,12 +12,19 @@ add_executable(ArrC
         include/optim/sgd.cuh
         src/optim/rmsprop.cu
         src/optim/adam.cu
-        src/optim/adam.cu
         include/slices.h
         src/slices.cpp
+        src/utils.cpp
         include/elementwise_kernels.cuh
         include/losses/loss.h
         include/nn/losses.h
+        include/functions/base.h
+        include/functions/arithmetic.h
+        include/optim/optimizer.h
+        include/optim/adam.cuh
+        include/optim/rmsprop.cuh
+        include/optim/kernels.cuh
+        include/utils.h
 )
 
 set_target_properties(ArrC PROPERTIES

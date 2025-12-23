@@ -11,7 +11,7 @@
 class SGD: public Optimizer {
 private:
     float beta;
-    std::vector<NDArrayPtrVariant> momentum;
+    std::vector<arr::NDArrayPtrVariant> momentum;
 public:
     SGD(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype = FLOAT);

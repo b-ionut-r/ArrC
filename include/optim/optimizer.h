@@ -1,3 +1,6 @@
+#ifndef ARRC_OPTIMIZER_H
+#define ARRC_OPTIMIZER_H
+
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -28,7 +31,7 @@ public:
               const ComputeDType &dtype = FLOAT):
               params(params), lr(lr), weightDecay(weightDecay), dtype(dtype) {
     };
-    virtual ~Optimizer() = 0;
+    virtual ~Optimizer() {}
     virtual void step() = 0;
     void zeroGrad() {
         for (auto &param: params)
@@ -40,7 +43,7 @@ public:
     ComputeDType getDType() const {return dtype;}
     void setLR(const float &lr) {this->lr = lr;}
     void setWeightDecay(const float &weight_decay) {this->weightDecay = weight_decay;}
-    friend std::ostream operator<<(std::ostream &os, const Optimizer &opt) = 0;
+    // Note: operator<< is defined in each subclass, not as pure virtual in base
 };
 
-Optimizer::~Optimizer(){};
+#endif // ARRC_OPTIMIZER_H
