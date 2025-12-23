@@ -12,7 +12,7 @@
 #include "tensor.h"
 
 
-Adam::Adam(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
+Adam::Adam(const std::vector<tensor::TensorSharedVariant> &params, const float &lr,
         const float &weightDecay, const float &beta1, const float &beta2,
         const double &eps, const ComputeDType &dtype,
         const bool &adamW):
@@ -20,17 +20,17 @@ Adam::Adam(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
        beta1(beta1),beta2(beta2), eps(eps), adamW(adamW) {
     try {
         for (const auto &param : params) {
-            std::visit([&](auto param) {
-                using dtype = typename std::decay_t<decltype(*param)>::value_type;
-                auto mom = new NDArray<dtype>(param->getShape());
+            std::visit([&](auto param_shared) {
+                using dtype = typename std::decay_t<decltype(*param_shared)>::value_type;
+                auto mom = new NDArray<dtype>(param_shared->getShape());
                 mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
                 firstMomentum.push_back(mom);
             }, param);
         }
         for (const auto &param : params) {
-            std::visit([&](auto param) {
-                using dtype = typename std::decay_t<decltype(*param)>::value_type;
-                auto mom = new NDArray<dtype>(param->getShape());
+            std::visit([&](auto param_shared) {
+                using dtype = typename std::decay_t<decltype(*param_shared)>::value_type;
+                auto mom = new NDArray<dtype>(param_shared->getShape());
                 mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
                 secondMomentum.push_back(mom);
             }, param);
@@ -57,32 +57,37 @@ Adam::~Adam(){
 
 
 void Adam::step() {
-    double biasCorrection1 = 1 - pow(beta1, t);
-    double biasCorrection2 = 1 - pow(beta2, t);
+    t++;  // Increment BEFORE computing bias correction to avoid division by zero
+    double biasCorrection1 = 1.0 - pow(beta1, t);
+    double biasCorrection2 = 1.0 - pow(beta2, t);
     for (size_t i = 0; i < params.size(); i++) {
         auto run = [&](auto dummy) {
             using dtype = decltype(dummy);
-            std::visit([&](auto param, auto m1, auto m2) {
-                if (param->requiresGrad && param->getGradPtr() != nullptr) {
-                    int NThreads = 256;
-                    int NBlocks = getNBlocks(param->getSize(), NThreads);
+            std::visit([&](auto weak_param, auto m1, auto m2) {
+                // Lock the weak_ptr to get access to the tensor
+                if (auto param = weak_param.lock()) {
+                    if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
+                        int NThreads = 256;
+                        int NBlocks = getNBlocks(param->getSize(), NThreads);
 
-                    fusedAdamKernel<dtype><<<NBlocks, NThreads>>>(
-                        param->getSize(),
-                        param->getDataPtr()->getData(),
-                        param->getGradPtr()->getData(),
-                        m1->getData(),
-                        m2->getData(),
-                        lr,
-                        weightDecay,
-                        beta1,
-                        beta2,
-                        biasCorrection1,
-                        biasCorrection2,
-                        eps,
-                        adamW
-                    );
+                        fusedAdamKernel<dtype><<<NBlocks, NThreads>>>(
+                            param->getSize(),
+                            param->getDataPtr()->getData(),
+                            param->getGradPtr()->getData(),
+                            m1->getData(),
+                            m2->getData(),
+                            lr,
+                            weightDecay,
+                            beta1,
+                            beta2,
+                            biasCorrection1,
+                            biasCorrection2,
+                            eps,
+                            adamW
+                        );
+                    }
                 }
+                // If lock() fails, parameter was deleted - skip it
             }, params[i], firstMomentum[i], secondMomentum[i]);
         };
         switch (dtype) {
@@ -91,13 +96,13 @@ void Adam::step() {
             case DOUBLE: run(double{0}); break;
         }
     }
-    // Syncronize and check errors once per step
+    // Synchronize and check errors once per step
     cudaDeviceSynchronize();
     auto err = cudaGetLastError();
     if (err != cudaSuccess) {
         throw CudaKernelException(cudaGetErrorString(err));
     }
-    t++;
+    // Note: t was already incremented at the start of step()
 }
 
 ostream & operator<<(ostream &os, const Adam &adam) {

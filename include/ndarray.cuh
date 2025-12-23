@@ -45,8 +45,6 @@ protected:
     void allocateDeviceMetadata(int** dStrides=nullptr,
                                 int** dShape=nullptr) const;
     template <typename Op>
-    NDArray<dtype> executeElementWise(Op op, const NDArray *other = nullptr,
-                                      const NDArray *final = nullptr) const;
 public:
     using value_type = dtype;
     /// CONSTRUCTORS and DESTRUCTORS
@@ -83,6 +81,9 @@ public:
     bool isContiguous() const;
 
     /// OVERLOADED OPERATORS
+    template <typename Op>
+    NDArray<dtype> executeElementWise(Op op, const NDArray *other = nullptr,
+                                      const NDArray *final = nullptr) const;
     dtype& operator[](const std::vector<int>& idx);
     NDArray operator[](vector<Slice> slices);
     NDArray& operator=(const dtype &value);
@@ -420,7 +421,8 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
 
 template <typename dtype>
 NDArray<dtype>& NDArray<dtype>::operator=(const dtype &value) {
-    return executeElementWise(SetConstantOp<dtype>{value}, nullptr, this); // inplace execution
+    executeElementWise(SetConstantOp<dtype>{value}, nullptr, this); // inplace execution
+    return *this;  // Return reference to this, not the temporary from executeElementWise
 }
 
 template <typename dtype>
@@ -432,7 +434,8 @@ NDArray<dtype>& NDArray<dtype>::operator=(const NDArray<dtype> &other) {
         cudaDeviceSynchronize();
         return *this;
     }
-    return executeElementWise(AssignOp<dtype>{}, &other, this); // inplace execution
+    executeElementWise(AssignOp<dtype>{}, &other, this); // inplace execution
+    return *this;  // Return reference to this, not the temporary from executeElementWise
 }
 
 
@@ -586,7 +589,45 @@ void NDArray<dtype>::allocateDeviceMetadata(int** dStrides, int** dShape) const 
 template <typename dtype>
 template <typename newDtype>
 NDArray<newDtype> NDArray<dtype>::cast() const {
-    return executeElementWise(CastOp<newDtype, dtype>{}, nullptr, nullptr);
+    NDArray<newDtype> result(shape);
+
+    int* dShape = nullptr;
+    int* dSrcStrides = nullptr;
+    int* dDstStrides = nullptr;
+
+    try {
+        cudaMalloc(&dShape, ndim * sizeof(int));
+        cudaMalloc(&dSrcStrides, ndim * sizeof(int));
+        cudaMalloc(&dDstStrides, ndim * sizeof(int));
+
+        cudaMemcpy(dShape, shape.data(), ndim * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(dSrcStrides, strides.data(), ndim * sizeof(int), cudaMemcpyHostToDevice);
+        auto resultStrides = result.getStrides();
+        cudaMemcpy(dDstStrides, resultStrides.data(), ndim * sizeof(int), cudaMemcpyHostToDevice);
+
+        castKernel<newDtype, dtype><<<N_BLOCKS, N_THREADS>>>(
+            result.getData(), 0, dDstStrides,
+            data, offset, dSrcStrides,
+            size, ndim, dShape
+        );
+        cudaDeviceSynchronize();
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw CudaKernelException(cudaGetErrorString(err));
+        }
+    } catch (...) {
+        if (dShape) cudaFree(dShape);
+        if (dSrcStrides) cudaFree(dSrcStrides);
+        if (dDstStrides) cudaFree(dDstStrides);
+        throw;
+    }
+
+    cudaFree(dShape);
+    cudaFree(dSrcStrides);
+    cudaFree(dDstStrides);
+
+    return result;
 }
 
 
@@ -669,6 +710,18 @@ namespace arr {
         NDArray<__half>*,
         NDArray<__nv_bfloat16>*,
         NDArray<bool>*
+    >;
+
+    using NDArrayUniquePtrVariant = std::variant<
+        std::unique_ptr<NDArray<int>>,
+        std::unique_ptr<NDArray<int32_t>>,
+        std::unique_ptr<NDArray<int64_t>>,
+        std::unique_ptr<NDArray<size_t>>,
+        std::unique_ptr<NDArray<float>>,
+        std::unique_ptr<NDArray<double>>,
+        std::unique_ptr<NDArray<__half>>,
+        std::unique_ptr<NDArray<__nv_bfloat16>>,
+        std::unique_ptr<NDArray<bool>>
     >;
 
     template <typename dtype>

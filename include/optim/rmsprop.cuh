@@ -13,7 +13,7 @@ private:
     double eps;
     std::vector<arr::NDArrayPtrVariant> momentum;
 public:
-    RMSProp(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
+    RMSProp(const std::vector<tensor::TensorSharedVariant> &params, const float &lr,
                      const float &weightDecay, const float &beta,
                      const double &eps = 1e-8, const ComputeDType &dtype = FLOAT);
     ~RMSProp() override;

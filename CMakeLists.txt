@@ -1,39 +1,43 @@
-cmake_minimum_required(VERSION 4.0)
-project(ArrC CUDA)
+cmake_minimum_required(VERSION 3.18)
+project(ArrC CUDA CXX)
 
 set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CXX_STANDARD 20)
 
 add_executable(ArrC
-        include/ndarray.cuh
-        include/exceptions.h
+        # Main entry point
+        main.cu
+
+        # Core source files
         src/optim/sgd.cu
-        include/tensor.h
-        include/serialize.h
-        include/optim/sgd.cuh
         src/optim/rmsprop.cu
         src/optim/adam.cu
-        include/slices.h
         src/slices.cpp
         src/utils.cpp
+
+        # Headers (for IDE visibility)
+        include/ndarray.cuh
+        include/tensor.h
+        include/exceptions.h
+        include/slices.h
         include/elementwise_kernels.cuh
-        include/losses/loss.h
-        include/nn/losses.h
+        include/utils.h
         include/functions/base.h
         include/functions/arithmetic.h
         include/optim/optimizer.h
+        include/optim/sgd.cuh
         include/optim/adam.cuh
         include/optim/rmsprop.cuh
         include/optim/kernels.cuh
-        include/utils.h
-)
-
-set_target_properties(ArrC PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON)
-
-target_include_directories(ArrC PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        include/nn/losses.h
 )
 
 set_target_properties(ArrC PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+)
+
+target_include_directories(ArrC PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )

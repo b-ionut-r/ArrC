@@ -42,19 +42,19 @@ Slice::Iterator Slice::Iterator::operator++(int) {
 
 // Inequality operator
 bool Slice::Iterator::operator!=(const Iterator &other) const {
-    (void) other; // mark as unused
+    // For range-based for loops: check if we've reached or passed the end
+    // Also properly compare against other iterator for general use
+    if (current == other.current) return false;
     if (step > 0) {
         return current < stop;
-    }
-    else {
+    } else {
         return current > stop;
     }
 }
 
 // Equality operator
 bool Slice::Iterator::operator==(const Iterator &other) const {
-    (void) other;
-    return !(*this != other);
+    return current == other.current;
 }
 
 Slice::Iterator Slice::begin() const {

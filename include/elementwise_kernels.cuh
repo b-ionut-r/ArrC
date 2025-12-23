@@ -55,6 +55,34 @@ __global__ void elementWiseKernelStrided(
     );
 }
 
+/// CASTING KERNEL (cross-type)
+template<typename DstType, typename SrcType>
+__global__ void castKernel(
+    DstType *output, const int out_offset, const int *out_strides,
+    const SrcType *input, const int in_offset, const int *in_strides,
+    const int size, const int ndim, const int *shape)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+
+    // Convert flat index to multi index
+    int multi_idx[33];
+    int remaining = idx;
+    for (int i = ndim - 1; i >= 0; i--) {
+        multi_idx[i] = remaining % shape[i];
+        remaining /= shape[i];
+    }
+
+    int out_idx = out_offset;
+    int in_idx = in_offset;
+    for (int i = 0; i < ndim; i++) {
+        out_idx += multi_idx[i] * out_strides[i];
+        in_idx += multi_idx[i] * in_strides[i];
+    }
+
+    output[out_idx] = static_cast<DstType>(input[in_idx]);
+}
+
 /// FUNCTORS
 template <typename newDtype, typename dtype>
 struct CastOp {

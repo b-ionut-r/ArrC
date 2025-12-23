@@ -21,21 +21,34 @@ enum ComputeDType {
 
 class Optimizer {
 protected:
-    std::vector<tensor::TensorPtrVariant>params;
+    std::vector<tensor::TensorWeakVariant> params;  // Weak references to parameters
     float lr;
     float weightDecay;
     size_t t = 0;
     ComputeDType dtype = FLOAT;
 public:
-    Optimizer(const std::vector<tensor::TensorPtrVariant> &params, const float &lr, const float &weightDecay,
+    // Constructor takes shared_ptr and stores as weak_ptr
+    Optimizer(const std::vector<tensor::TensorSharedVariant> &params, const float &lr, const float &weightDecay,
               const ComputeDType &dtype = FLOAT):
-              params(params), lr(lr), weightDecay(weightDecay), dtype(dtype) {
+              lr(lr), weightDecay(weightDecay), dtype(dtype) {
+        // Convert shared_ptr to weak_ptr for storage
+        this->params.reserve(params.size());
+        for (const auto& p : params) {
+            std::visit([this](auto sp) {
+                this->params.push_back(std::weak_ptr(sp));
+            }, p);
+        }
     };
     virtual ~Optimizer() {}
     virtual void step() = 0;
     void zeroGrad() {
-        for (auto &param: params)
-            std::visit([](auto t){t->zeroGrad();}, param);
+        for (auto &weak_param: params) {
+            std::visit([](auto wp) {
+                if (auto t = wp.lock()) {
+                    t->zeroGrad();
+                }
+            }, weak_param);
+        }
     }
     float getLR() const {return lr;}
     float getWeightDecay() const {return weightDecay;}

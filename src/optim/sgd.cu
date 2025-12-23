@@ -12,14 +12,14 @@
 #include "utils.h"
 
 
-SGD::SGD(const std::vector<tensor::TensorPtrVariant> &params, const float &lr,
+SGD::SGD(const std::vector<tensor::TensorSharedVariant> &params, const float &lr,
         const float &weightDecay, const float &beta, const ComputeDType &dtype):
         Optimizer(params, lr, weightDecay, dtype), beta(beta) {
     try {
         for (const auto &param : params) {
-            std::visit([&](auto param) {
-                using param_dtype = typename std::decay_t<decltype(*param)>::value_type;
-                auto mom = new NDArray<param_dtype>(param->getShape());
+            std::visit([&](auto param_shared) {
+                using param_dtype = typename std::decay_t<decltype(*param_shared)>::value_type;
+                auto mom = new NDArray<param_dtype>(param_shared->getShape());
                 mom->executeElementWise(SetConstantOp<param_dtype>{static_cast<param_dtype>(0)}, nullptr, mom);
                 momentum.push_back(mom);
             }, param);
@@ -43,21 +43,25 @@ void SGD::step() {
     for (size_t i = 0; i < params.size(); i++) {
         auto run = [&](auto dummy) {
             using dtype = decltype(dummy);
-            std::visit([&](auto param, auto mom) {
-                if (param->requiresGrad && param->getGradPtr() != nullptr) {
-                    int NThreads = 256;
-                    int NBlocks = getNBlocks(param->getSize(), NThreads);
+            std::visit([&](auto weak_param, auto mom) {
+                // Lock the weak_ptr to get access to the tensor
+                if (auto param = weak_param.lock()) {
+                    if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
+                        int NThreads = 256;
+                        int NBlocks = getNBlocks(param->getSize(), NThreads);
 
-                    fusedSGDKernel<dtype><<<NBlocks, NThreads>>>(
-                        param->getSize(),
-                        param->getDataPtr()->getData(),
-                        param->getGradPtr()->getData(),
-                        mom->getData(),
-                        lr,
-                        weightDecay,
-                        beta
-                    );
-                };
+                        fusedSGDKernel<dtype><<<NBlocks, NThreads>>>(
+                            param->getSize(),
+                            param->getDataPtr()->getData(),
+                            param->getGradPtr()->getData(),
+                            mom->getData(),
+                            lr,
+                            weightDecay,
+                            beta
+                        );
+                    }
+                }
+                // If lock() fails, parameter was deleted - skip it
             }, params[i], momentum[i]);
         };
         switch (dtype) {
