@@ -29,8 +29,10 @@ istream& operator>>(istream &is, NDArray<dtype> &arr);
 ///
 
 class NDArrayBase {
+public:
     virtual ~NDArrayBase() = 0;
 };
+NDArrayBase::~NDArrayBase() {} // for std::vector of base pointers
 
 template <typename dtype>
 class NDArray: public NDArrayBase{
