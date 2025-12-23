@@ -11,8 +11,10 @@
 #include <unordered_set>
 #include <algorithm>
 #include <memory>
+#include <variant>
 
-// Forward declarations for friend access
+// Forward declarations
+template <typename dtype> class Tensor;
 template <typename dtype>
 void buildTopo(Tensor<dtype> *tensor, std::vector<Tensor<dtype>*> &topoOrder,
                std::unordered_set<Tensor<dtype>*> &visited);
@@ -112,10 +114,15 @@ void buildTopo(Tensor<dtype> *tensor, std::vector<Tensor<dtype>*> &topoOrder,
     if (tensor->gradFn != nullptr) {
         for (const auto &parent_variant : tensor->gradFn->parent_tensors) {
             std::visit([&](auto weak_parent) {
-                // Lock the weak_ptr to get a shared_ptr
-                if (auto parent = weak_parent.lock()) {
-                    if (parent->requiresGrad) {
-                        buildTopo(parent.get(), topoOrder, visited);
+                using parent_tensor = typename std::decay_t<decltype(weak_parent)>::element_type;
+                using parent_dtype = typename parent_tensor::value_type;
+
+                if constexpr (std::is_same_v<parent_dtype, dtype>) {
+                    // Lock the weak_ptr to get a shared_ptr
+                    if (auto parent = weak_parent.lock()) {
+                        if (parent->getRequiresGrad()) {
+                            buildTopo(parent.get(), topoOrder, visited);
+                        }
                     }
                 }
                 // If lock() fails, parent was deleted - skip it
@@ -197,12 +204,13 @@ void Tensor<dtype>::backward(NDArray<dtype> *grad,
                         using grad_dtype = typename std::decay_t<decltype(*parentGradPtr)>::value_type;
 
                         if constexpr (std::is_same_v<parent_dtype, grad_dtype>) {
-                            if (parentTensor->requiresGrad && parentGradPtr) {
-                                if (!parentTensor->grad) {
-                                    parentTensor->grad = std::move(parentGradPtr);
+                            if (parentTensor->getRequiresGrad() && parentGradPtr) {
+                                auto* parentGrad = parentTensor->getGradPtr();
+                                if (!parentGrad) {
+                                    parentTensor->replaceGrad(std::move(parentGradPtr));
                                 } else {
-                                    parentTensor->grad->executeElementWise(AffineAddOp<parent_dtype>{1, 1},
-                                        parentGradPtr.get(), parentTensor->grad.get());
+                                    parentGrad->executeElementWise(AffineAddOp<parent_dtype>{1, 1},
+                                        parentGradPtr.get(), parentGrad);
                                 }
                             }
                         }
@@ -253,7 +261,6 @@ Tensor<newDtype> Tensor<dtype>::cast() const {
 namespace tensor {
     // TensorSharedVariant for passing tensor shared_ptr (inputs to functions)
     using TensorSharedVariant = std::variant<
-        std::shared_ptr<Tensor<int>>,
         std::shared_ptr<Tensor<int32_t>>,
         std::shared_ptr<Tensor<int64_t>>,
         std::shared_ptr<Tensor<size_t>>,
@@ -266,7 +273,6 @@ namespace tensor {
 
     // TensorWeakVariant for storing weak references (in Function::parent_tensors)
     using TensorWeakVariant = std::variant<
-        std::weak_ptr<Tensor<int>>,
         std::weak_ptr<Tensor<int32_t>>,
         std::weak_ptr<Tensor<int64_t>>,
         std::weak_ptr<Tensor<size_t>>,
@@ -279,7 +285,6 @@ namespace tensor {
 
     // Legacy TensorPtrVariant (kept for backward compatibility during transition)
     using TensorPtrVariant = std::variant<
-        Tensor<int>*,
         Tensor<int32_t>*,
         Tensor<int64_t>*,
         Tensor<size_t>*,

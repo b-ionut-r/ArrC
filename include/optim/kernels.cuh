@@ -1,7 +1,7 @@
 #include <cmath>
 
 
-template <typename CompT, typename ParamT, typename GradT, typename MomT>
+template <typename CompT, typename ParamT = CompT, typename GradT = CompT, typename MomT = CompT>
 __global__ void fusedSGDKernel(
     const size_t size,
     ParamT *param,
@@ -29,7 +29,7 @@ __global__ void fusedSGDKernel(
 
 
 
-template <typename CompT, typename ParamT, typename GradT, typename MomT>
+template <typename CompT, typename ParamT = CompT, typename GradT = CompT, typename MomT = CompT>
 __global__ void fusedRMSPropKernel(
     const size_t size,
     ParamT *param,
@@ -60,7 +60,7 @@ __global__ void fusedRMSPropKernel(
 }
 
 
-template <typename CompT, typename ParamT, typename GradT, typename MomT>
+template <typename CompT, typename ParamT = CompT, typename GradT = CompT, typename MomT = CompT>
 __global__ void fusedAdamKernel(
     const size_t size,
     ParamT *param,

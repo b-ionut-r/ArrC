@@ -18,8 +18,13 @@ public:
             throw std::runtime_error("AddFunction requires exactly 2 inputs");
 
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype = typename std::decay_t<decltype(*a)>::value_type;
-            return new NDArray<dtype>(*a + *b);
+            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
+            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
+                return new NDArray<dtype_a>(*a + *b);
+            } else {
+                throw std::runtime_error("AddFunction: type mismatch between inputs");
+            }
         }, inputs[0], inputs[1]);
     }
 
@@ -44,8 +49,13 @@ public:
             throw std::runtime_error("SubFunction requires exactly 2 inputs");
 
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype = typename std::decay_t<decltype(*a)>::value_type;
-            return new NDArray<dtype>(*a - *b);
+            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
+            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
+                return new NDArray<dtype_a>(*a - *b);
+            } else {
+                throw std::runtime_error("SubFunction: type mismatch between inputs");
+            }
         }, inputs[0], inputs[1]);
     }
 
@@ -70,8 +80,13 @@ public:
             throw std::runtime_error("MulFunction requires exactly 2 inputs");
 
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype = typename std::decay_t<decltype(*a)>::value_type;
-            return new NDArray<dtype>(*a * *b);
+            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
+            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
+                return new NDArray<dtype_a>(*a * *b);
+            } else {
+                throw std::runtime_error("MulFunction: type mismatch between inputs");
+            }
         }, inputs[0], inputs[1]);
     }
 
@@ -84,12 +99,16 @@ public:
             using dtype = typename std::decay_t<decltype(*grad)>::value_type;
             std::vector<arr::NDArrayUniquePtrVariant> grads;
             std::visit([&](auto a, auto b) {
-                if (a && b) {
-                    grads.push_back(std::make_unique<NDArray<dtype>>(*grad * *b));  // d(a*b)/da = b
-                    grads.push_back(std::make_unique<NDArray<dtype>>(*grad * *a));  // d(a*b)/db = a
-                } else {
-                    grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
-                    grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
+                using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
+                if constexpr (std::is_same_v<dtype_a, dtype_b> && std::is_same_v<dtype_a, dtype>) {
+                    if (a && b) {
+                        grads.push_back(std::make_unique<NDArray<dtype>>(*grad * *b));  // d(a*b)/da = b
+                        grads.push_back(std::make_unique<NDArray<dtype>>(*grad * *a));  // d(a*b)/db = a
+                    } else {
+                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                    }
                 }
             }, parent_data[0], parent_data[1]);
             return grads;
@@ -106,8 +125,13 @@ public:
             throw std::runtime_error("DivFunction requires exactly 2 inputs");
 
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype = typename std::decay_t<decltype(*a)>::value_type;
-            return new NDArray<dtype>(*a / *b);
+            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
+            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
+                return new NDArray<dtype_a>(*a / *b);
+            } else {
+                throw std::runtime_error("DivFunction: type mismatch between inputs");
+            }
         }, inputs[0], inputs[1]);
     }
 
@@ -120,14 +144,18 @@ public:
             using dtype = typename std::decay_t<decltype(*grad)>::value_type;
             std::vector<arr::NDArrayUniquePtrVariant> grads;
             std::visit([&](auto a, auto b) {
-                if (a && b) {
-                    // d(a/b)/da = 1/b
-                    grads.push_back(std::make_unique<NDArray<dtype>>(*grad / *b));
-                    // d(a/b)/db = -a/b^2
-                    grads.push_back(std::make_unique<NDArray<dtype>>(-*grad * *a / (*b * *b)));
-                } else {
-                    grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
-                    grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
+                using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
+                if constexpr (std::is_same_v<dtype_a, dtype_b> && std::is_same_v<dtype_a, dtype>) {
+                    if (a && b) {
+                        // d(a/b)/da = 1/b
+                        grads.push_back(std::make_unique<NDArray<dtype>>(*grad / *b));
+                        // d(a/b)/db = -a/b^2
+                        grads.push_back(std::make_unique<NDArray<dtype>>(-*grad * *a / (*b * *b)));
+                    } else {
+                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                    }
                 }
             }, parent_data[0], parent_data[1]);
             return grads;

@@ -64,35 +64,41 @@ void Adam::step() {
         auto run = [&](auto dummy) {
             using dtype = decltype(dummy);
             std::visit([&](auto weak_param, auto m1, auto m2) {
-                // Lock the weak_ptr to get access to the tensor
-                if (auto param = weak_param.lock()) {
-                    if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
-                        int NThreads = 256;
-                        int NBlocks = getNBlocks(param->getSize(), NThreads);
+                using param_tensor = typename std::decay_t<decltype(weak_param)>::element_type;
+                using param_dtype = typename param_tensor::value_type;
+                using m1_dtype = typename std::decay_t<decltype(*m1)>::value_type;
+                using m2_dtype = typename std::decay_t<decltype(*m2)>::value_type;
 
-                        fusedAdamKernel<dtype><<<NBlocks, NThreads>>>(
-                            param->getSize(),
-                            param->getDataPtr()->getData(),
-                            param->getGradPtr()->getData(),
-                            m1->getData(),
-                            m2->getData(),
-                            lr,
-                            weightDecay,
-                            beta1,
-                            beta2,
-                            biasCorrection1,
-                            biasCorrection2,
-                            eps,
-                            adamW
-                        );
+                if constexpr (std::is_same_v<param_dtype, m1_dtype> &&
+                              std::is_same_v<param_dtype, m2_dtype>) {
+                    if (auto param = weak_param.lock()) {
+                        if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
+                            int NThreads = 256;
+                            int NBlocks = getNBlocks(param->getSize(), NThreads);
+
+                            fusedAdamKernel<dtype, param_dtype, param_dtype, param_dtype><<<NBlocks, NThreads>>>(
+                                param->getSize(),
+                                param->getDataPtr()->getData(),
+                                param->getGradPtr()->getData(),
+                                m1->getData(),
+                                m2->getData(),
+                                lr,
+                                weightDecay,
+                                beta1,
+                                beta2,
+                                biasCorrection1,
+                                biasCorrection2,
+                                eps,
+                                adamW
+                            );
+                        }
                     }
                 }
-                // If lock() fails, parameter was deleted - skip it
             }, params[i], firstMomentum[i], secondMomentum[i]);
         };
         switch (dtype) {
             case HALF: run(__half(0)); break;
-            case FLOAT: run (float{0}); break;
+            case FLOAT: run(float{0}); break;
             case DOUBLE: run(double{0}); break;
         }
     }

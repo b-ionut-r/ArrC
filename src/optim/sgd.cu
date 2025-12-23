@@ -44,32 +44,36 @@ void SGD::step() {
         auto run = [&](auto dummy) {
             using dtype = decltype(dummy);
             std::visit([&](auto weak_param, auto mom) {
-                // Lock the weak_ptr to get access to the tensor
-                if (auto param = weak_param.lock()) {
-                    if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
-                        int NThreads = 256;
-                        int NBlocks = getNBlocks(param->getSize(), NThreads);
+                using param_tensor = typename std::decay_t<decltype(weak_param)>::element_type;
+                using param_dtype = typename param_tensor::value_type;
+                using mom_dtype = typename std::decay_t<decltype(*mom)>::value_type;
 
-                        fusedSGDKernel<dtype><<<NBlocks, NThreads>>>(
-                            param->getSize(),
-                            param->getDataPtr()->getData(),
-                            param->getGradPtr()->getData(),
-                            mom->getData(),
-                            lr,
-                            weightDecay,
-                            beta
-                        );
+                if constexpr (std::is_same_v<param_dtype, mom_dtype>) {
+                    if (auto param = weak_param.lock()) {
+                        if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
+                            int NThreads = 256;
+                            int NBlocks = getNBlocks(param->getSize(), NThreads);
+
+                            fusedSGDKernel<dtype, param_dtype, param_dtype, param_dtype><<<NBlocks, NThreads>>>(
+                                param->getSize(),
+                                param->getDataPtr()->getData(),
+                                param->getGradPtr()->getData(),
+                                mom->getData(),
+                                lr,
+                                weightDecay,
+                                beta
+                            );
+                        }
                     }
                 }
-                // If lock() fails, parameter was deleted - skip it
             }, params[i], momentum[i]);
         };
         switch (dtype) {
             case HALF: run(__half(0)); break;
-            case FLOAT: run (float{0}); break;
+            case FLOAT: run(float{0}); break;
             case DOUBLE: run(double{0}); break;
         }
-    };
+    }
     // Syncronize and check errors once per step
     cudaDeviceSynchronize();
     auto err = cudaGetLastError();

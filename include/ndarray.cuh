@@ -15,6 +15,8 @@
 #include "utils.h"
 #include "exceptions.h"
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
+#include <variant>
 
 
 /// FORWARD DECLARATIONS FOR OSTREAM
@@ -44,7 +46,6 @@ protected:
     // Helpers
     void allocateDeviceMetadata(int** dStrides=nullptr,
                                 int** dShape=nullptr) const;
-    template <typename Op>
 public:
     using value_type = dtype;
     /// CONSTRUCTORS and DESTRUCTORS
@@ -83,7 +84,7 @@ public:
     /// OVERLOADED OPERATORS
     template <typename Op>
     NDArray<dtype> executeElementWise(Op op, const NDArray *other = nullptr,
-                                      const NDArray *final = nullptr) const;
+                                      NDArray *final = nullptr) const;
     dtype& operator[](const std::vector<int>& idx);
     NDArray operator[](vector<Slice> slices);
     NDArray& operator=(const dtype &value);
@@ -198,7 +199,7 @@ NDArray<dtype>::NDArray(const NDArray<dtype> &other):
         cudaMemcpy(data, other.data, size * itemBytes, cudaMemcpyDeviceToDevice);
     } else {
         NDArray<dtype> temp(data, shape, 0, strides); // temp view
-        temp.executeElementWise(AssignOp<dtype>{}, &temp, &other);
+        temp.executeElementWise(AssignOp<dtype>{}, &other, &temp);
         temp.ownsData = false;
     }
     cudaDeviceSynchronize();
@@ -318,12 +319,14 @@ template <typename Op>
 NDArray<dtype> NDArray<dtype>::executeElementWise(
     Op op,
     const NDArray<dtype> *other,
-    const NDArray<dtype> *final) const
+    NDArray<dtype> *final) const
 {
     /* first, second result */
     bool allContig = this->isContiguous() && (other ? other->isContiguous() : true);
     /// HANDLE BROADCASTING
-    NDArray<dtype> *result, *first, *second;
+    NDArray<dtype> *result = nullptr;
+    const NDArray<dtype> *first = nullptr;
+    const NDArray<dtype> *second = nullptr;
     bool delFirst = false, delSecond = false, delResult = false;
     if (other == nullptr || final != nullptr) {
         first = this;
@@ -650,8 +653,8 @@ NDArray<dtype> NDArray<dtype>::ones_like() const {
 template <typename dtype>
 struct BroadcastInfo {
     vector<int> finalShape;  // container 1
-    list<int> aBroadcastAxes; // container 2
-    list<int> bBroadcastAxes; // container 2
+    vector<int> aBroadcastAxes; // container 2
+    vector<int> bBroadcastAxes; // container 2
 };
 
 template <typename dtype>
@@ -701,7 +704,6 @@ namespace arr {
         NDArray<bool>
     >;
     using NDArrayPtrVariant = std::variant<
-        NDArray<int>*,
         NDArray<int32_t>*,
         NDArray<int64_t>*,
         NDArray<size_t>*,
@@ -713,7 +715,6 @@ namespace arr {
     >;
 
     using NDArrayUniquePtrVariant = std::variant<
-        std::unique_ptr<NDArray<int>>,
         std::unique_ptr<NDArray<int32_t>>,
         std::unique_ptr<NDArray<int64_t>>,
         std::unique_ptr<NDArray<size_t>>,
