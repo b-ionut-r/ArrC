@@ -27,16 +27,16 @@ RMSProp::RMSProp(const std::vector<tensor::TensorSharedVariant> &params, const f
             }, param);
         }
     } catch (...) {
-        for (auto &mom: momentum)
-            std::visit([&](auto mom){ delete mom; }, mom);
+        for (auto &mom_variant: momentum)
+            std::visit([&](auto mom_ptr){ delete mom_ptr; }, mom_variant);
         momentum.clear();
         throw;
     }
 };
 
 RMSProp::~RMSProp() {
-    for (auto &mom: momentum) {
-        std::visit([&](auto mom){delete mom;}, mom);
+    for (auto &mom_variant: momentum) {
+        std::visit([&](auto mom_ptr){delete mom_ptr;}, mom_variant);
     }
     momentum.clear();
 };

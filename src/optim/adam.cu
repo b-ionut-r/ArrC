@@ -36,10 +36,10 @@ Adam::Adam(const std::vector<tensor::TensorSharedVariant> &params, const float &
             }, param);
         }
     } catch (...) {
-        for (auto &mom : firstMomentum)
-            std::visit([&](auto mom) { delete mom; }, mom);
-        for (auto &mom : secondMomentum)
-            std::visit([&](auto mom) { delete mom; }, mom);
+        for (auto &mom_variant : firstMomentum)
+            std::visit([&](auto mom_ptr) { delete mom_ptr; }, mom_variant);
+        for (auto &mom_variant : secondMomentum)
+            std::visit([&](auto mom_ptr) { delete mom_ptr; }, mom_variant);
         firstMomentum.clear();
         secondMomentum.clear();
         throw;
@@ -47,10 +47,10 @@ Adam::Adam(const std::vector<tensor::TensorSharedVariant> &params, const float &
 };
 
 Adam::~Adam(){
-    for (auto &mom : firstMomentum)
-        std::visit([&](auto mom){delete mom;}, mom);
-    for (auto &mom : secondMomentum)
-        std::visit([&](auto mom) {delete mom;}, mom);
+    for (auto &mom_variant : firstMomentum)
+        std::visit([&](auto mom_ptr){delete mom_ptr;}, mom_variant);
+    for (auto &mom_variant : secondMomentum)
+        std::visit([&](auto mom_ptr) {delete mom_ptr;}, mom_variant);
     firstMomentum.clear();
     secondMomentum.clear();
 }

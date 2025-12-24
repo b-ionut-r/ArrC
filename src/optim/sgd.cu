@@ -25,16 +25,16 @@ SGD::SGD(const std::vector<tensor::TensorSharedVariant> &params, const float &lr
             }, param);
         }
     } catch (...) {
-        for (auto &mom: momentum)
-            std::visit([&](auto mom) { delete mom; }, mom);
+        for (auto &mom_variant: momentum)
+            std::visit([&](auto mom_ptr) { delete mom_ptr; }, mom_variant);
         momentum.clear();
         throw;
     }
 };
 
 SGD::~SGD() {
-    for (auto &mom: momentum) {
-        std::visit([&](auto mom) {delete mom;}, mom);
+    for (auto &mom_variant: momentum) {
+        std::visit([&](auto mom_ptr) {delete mom_ptr;}, mom_variant);
     }
     momentum.clear();
 };
