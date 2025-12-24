@@ -11,9 +11,7 @@
 
 class AddFunction : public Function {
 public:
-    std::string getName() const override { return "AddFunction"; }
-
-    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant> &inputs) const override {
+    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("AddFunction requires exactly 2 inputs");
 
@@ -42,9 +40,7 @@ public:
 
 class SubFunction : public Function {
 public:
-    std::string getName() const override { return "SubFunction"; }
-
-    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant> &inputs) const override {
+    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("SubFunction requires exactly 2 inputs");
 
@@ -73,9 +69,7 @@ public:
 
 class MulFunction : public Function {
 public:
-    std::string getName() const override { return "MulFunction"; }
-
-    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant> &inputs) const override {
+    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("MulFunction requires exactly 2 inputs");
 
@@ -118,9 +112,7 @@ public:
 
 class DivFunction : public Function {
 public:
-    std::string getName() const override { return "DivFunction"; }
-
-    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant> &inputs) const override {
+    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("DivFunction requires exactly 2 inputs");
 
@@ -167,10 +159,9 @@ template <typename dtype>
 class ScalarAffineFunction : public Function {
     dtype alpha, beta;
 public:
-    ScalarAffineFunction(dtype alpha, dtype beta): alpha(alpha), beta(beta) {}
-    std::string getName() const override { return "ScalarAffineFunction"; }
+    ScalarAffineFunction(dtype alpha, dtype beta) : alpha(alpha), beta(beta) {}
 
-    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant> &inputs) const override {
+    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 1)
             throw std::runtime_error("ScalarAffineFunction requires exactly 1 input");
         return std::visit([&](auto a) -> arr::NDArrayPtrVariant {
@@ -200,10 +191,9 @@ template <typename dtype>
 class ScalarRDivFunction : public Function {
     dtype scalar;
 public:
-    explicit ScalarRDivFunction(dtype scalar): scalar(scalar) {}
-    std::string getName() const override { return "ScalarRDivFunction"; }
+    explicit ScalarRDivFunction(dtype scalar) : scalar(scalar) {}
 
-    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant> &inputs) const override {
+    arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 1)
             throw std::runtime_error("ScalarRDivFunction requires exactly 1 input");
         return std::visit([&](auto a) -> arr::NDArrayPtrVariant {
