@@ -6,34 +6,29 @@
 #define ARRC_ARITHMETIC_H
 
 #include "base.h"
-#include "../ndarray.cuh"
-#include <memory>
 
 class AddFunction : public Function {
 public:
     arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("AddFunction requires exactly 2 inputs");
-
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
-            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
-                return new NDArray<dtype_a>(*a + *b);
-            } else {
-                throw std::runtime_error("AddFunction: type mismatch between inputs");
-            }
+            using Ta = typename std::decay_t<decltype(*a)>::value_type;
+            using Tb = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<Ta, Tb>) return new NDArray<Ta>(*a + *b);
+            else throw std::runtime_error("AddFunction: type mismatch");
         }, inputs[0], inputs[1]);
     }
 
-    std::vector<arr::NDArrayUniquePtrVariant> backward(const arr::NDArrayPtrVariant &grad_output,
-                                                       const std::vector<arr::NDArrayPtrVariant>&) const override {
+    std::vector<arr::NDArrayUniquePtrVariant> backward(
+            const arr::NDArrayPtrVariant& gradOut,
+            const std::vector<arr::NDArrayPtrVariant>&) const override {
         std::vector<arr::NDArrayUniquePtrVariant> grads;
-        std::visit([&](auto grad) {
-            using dtype = typename std::decay_t<decltype(*grad)>::value_type;
-            grads.push_back(std::make_unique<NDArray<dtype>>(*grad));  // d(a+b)/da = 1
-            grads.push_back(std::make_unique<NDArray<dtype>>(*grad));  // d(a+b)/db = 1
-        }, grad_output);
+        std::visit([&](auto g) {
+            using T = typename std::decay_t<decltype(*g)>::value_type;
+            grads.push_back(std::make_unique<NDArray<T>>(*g));
+            grads.push_back(std::make_unique<NDArray<T>>(*g));
+        }, gradOut);
         return grads;
     }
 };
@@ -43,26 +38,23 @@ public:
     arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("SubFunction requires exactly 2 inputs");
-
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
-            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
-                return new NDArray<dtype_a>(*a - *b);
-            } else {
-                throw std::runtime_error("SubFunction: type mismatch between inputs");
-            }
+            using Ta = typename std::decay_t<decltype(*a)>::value_type;
+            using Tb = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<Ta, Tb>) return new NDArray<Ta>(*a - *b);
+            else throw std::runtime_error("SubFunction: type mismatch");
         }, inputs[0], inputs[1]);
     }
 
-    std::vector<arr::NDArrayUniquePtrVariant> backward(const arr::NDArrayPtrVariant &grad_output,
-                                                       const std::vector<arr::NDArrayPtrVariant>&) const override {
+    std::vector<arr::NDArrayUniquePtrVariant> backward(
+            const arr::NDArrayPtrVariant& gradOut,
+            const std::vector<arr::NDArrayPtrVariant>&) const override {
         std::vector<arr::NDArrayUniquePtrVariant> grads;
-        std::visit([&](auto grad) {
-            using dtype = typename std::decay_t<decltype(*grad)>::value_type;
-            grads.push_back(std::make_unique<NDArray<dtype>>(*grad));   // d(a-b)/da = 1
-            grads.push_back(std::make_unique<NDArray<dtype>>(-*grad));  // d(a-b)/db = -1
-        }, grad_output);
+        std::visit([&](auto g) {
+            using T = typename std::decay_t<decltype(*g)>::value_type;
+            grads.push_back(std::make_unique<NDArray<T>>(*g));
+            grads.push_back(std::make_unique<NDArray<T>>(-*g));
+        }, gradOut);
         return grads;
     }
 };
@@ -72,41 +64,37 @@ public:
     arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("MulFunction requires exactly 2 inputs");
-
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
-            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
-                return new NDArray<dtype_a>(*a * *b);
-            } else {
-                throw std::runtime_error("MulFunction: type mismatch between inputs");
-            }
+            using Ta = typename std::decay_t<decltype(*a)>::value_type;
+            using Tb = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<Ta, Tb>) return new NDArray<Ta>(*a * *b);
+            else throw std::runtime_error("MulFunction: type mismatch");
         }, inputs[0], inputs[1]);
     }
 
-    std::vector<arr::NDArrayUniquePtrVariant> backward(const arr::NDArrayPtrVariant &grad_output,
-                                                       const std::vector<arr::NDArrayPtrVariant> &parent_data) const override {
-        if (parent_data.size() != 2)
-            throw std::runtime_error("MulFunction backward requires exactly 2 parent tensors");
-
-        return std::visit([&](auto grad) -> std::vector<arr::NDArrayUniquePtrVariant> {
-            using dtype = typename std::decay_t<decltype(*grad)>::value_type;
+    std::vector<arr::NDArrayUniquePtrVariant> backward(
+            const arr::NDArrayPtrVariant& gradOut,
+            const std::vector<arr::NDArrayPtrVariant>& parentData) const override {
+        if (parentData.size() != 2)
+            throw std::runtime_error("MulFunction backward requires 2 parents");
+        return std::visit([&](auto g) -> std::vector<arr::NDArrayUniquePtrVariant> {
+            using T = typename std::decay_t<decltype(*g)>::value_type;
             std::vector<arr::NDArrayUniquePtrVariant> grads;
             std::visit([&](auto a, auto b) {
-                using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-                using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
-                if constexpr (std::is_same_v<dtype_a, dtype_b> && std::is_same_v<dtype_a, dtype>) {
+                using Ta = typename std::decay_t<decltype(*a)>::value_type;
+                using Tb = typename std::decay_t<decltype(*b)>::value_type;
+                if constexpr (std::is_same_v<Ta, Tb> && std::is_same_v<Ta, T>) {
                     if (a && b) {
-                        grads.push_back(std::make_unique<NDArray<dtype>>(*grad * *b));  // d(a*b)/da = b
-                        grads.push_back(std::make_unique<NDArray<dtype>>(*grad * *a));  // d(a*b)/db = a
+                        grads.push_back(std::make_unique<NDArray<T>>(*g * *b));
+                        grads.push_back(std::make_unique<NDArray<T>>(*g * *a));
                     } else {
-                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
-                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                        grads.push_back(std::make_unique<NDArray<T>>(g->zeros_like()));
+                        grads.push_back(std::make_unique<NDArray<T>>(g->zeros_like()));
                     }
                 }
-            }, parent_data[0], parent_data[1]);
+            }, parentData[0], parentData[1]);
             return grads;
-        }, grad_output);
+        }, gradOut);
     }
 };
 
@@ -115,193 +103,194 @@ public:
     arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 2)
             throw std::runtime_error("DivFunction requires exactly 2 inputs");
-
         return std::visit([](auto a, auto b) -> arr::NDArrayPtrVariant {
-            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-            using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
-            if constexpr (std::is_same_v<dtype_a, dtype_b>) {
-                return new NDArray<dtype_a>(*a / *b);
-            } else {
-                throw std::runtime_error("DivFunction: type mismatch between inputs");
-            }
+            using Ta = typename std::decay_t<decltype(*a)>::value_type;
+            using Tb = typename std::decay_t<decltype(*b)>::value_type;
+            if constexpr (std::is_same_v<Ta, Tb>) return new NDArray<Ta>(*a / *b);
+            else throw std::runtime_error("DivFunction: type mismatch");
         }, inputs[0], inputs[1]);
     }
 
-    std::vector<arr::NDArrayUniquePtrVariant> backward(const arr::NDArrayPtrVariant &grad_output,
-                                                       const std::vector<arr::NDArrayPtrVariant> &parent_data) const override {
-        if (parent_data.size() != 2)
-            throw std::runtime_error("DivFunction backward requires exactly 2 parent tensors");
-
-        return std::visit([&](auto grad) -> std::vector<arr::NDArrayUniquePtrVariant> {
-            using dtype = typename std::decay_t<decltype(*grad)>::value_type;
+    std::vector<arr::NDArrayUniquePtrVariant> backward(
+            const arr::NDArrayPtrVariant& gradOut,
+            const std::vector<arr::NDArrayPtrVariant>& parentData) const override {
+        if (parentData.size() != 2)
+            throw std::runtime_error("DivFunction backward requires 2 parents");
+        return std::visit([&](auto g) -> std::vector<arr::NDArrayUniquePtrVariant> {
+            using T = typename std::decay_t<decltype(*g)>::value_type;
             std::vector<arr::NDArrayUniquePtrVariant> grads;
             std::visit([&](auto a, auto b) {
-                using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-                using dtype_b = typename std::decay_t<decltype(*b)>::value_type;
-                if constexpr (std::is_same_v<dtype_a, dtype_b> && std::is_same_v<dtype_a, dtype>) {
+                using Ta = typename std::decay_t<decltype(*a)>::value_type;
+                using Tb = typename std::decay_t<decltype(*b)>::value_type;
+                if constexpr (std::is_same_v<Ta, Tb> && std::is_same_v<Ta, T>) {
                     if (a && b) {
-                        // d(a/b)/da = 1/b
-                        grads.push_back(std::make_unique<NDArray<dtype>>(*grad / *b));
-                        // d(a/b)/db = -a/b^2
-                        grads.push_back(std::make_unique<NDArray<dtype>>(-*grad * *a / (*b * *b)));
+                        grads.push_back(std::make_unique<NDArray<T>>(*g / *b));
+                        grads.push_back(std::make_unique<NDArray<T>>(-*g * *a / (*b * *b)));
                     } else {
-                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
-                        grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                        grads.push_back(std::make_unique<NDArray<T>>(g->zeros_like()));
+                        grads.push_back(std::make_unique<NDArray<T>>(g->zeros_like()));
                     }
                 }
-            }, parent_data[0], parent_data[1]);
+            }, parentData[0], parentData[1]);
             return grads;
-        }, grad_output);
+        }, gradOut);
     }
 };
 
 template <typename dtype>
 class ScalarAffineFunction : public Function {
-    dtype alpha, beta;
+    dtype alpha_, beta_;
 public:
-    ScalarAffineFunction(dtype alpha, dtype beta) : alpha(alpha), beta(beta) {}
+    ScalarAffineFunction(dtype alpha, dtype beta) : alpha_(alpha), beta_(beta) {}
 
     arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 1)
             throw std::runtime_error("ScalarAffineFunction requires exactly 1 input");
         return std::visit([&](auto a) -> arr::NDArrayPtrVariant {
-            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-            if constexpr (std::is_same_v<dtype_a, dtype>) {
-                return new NDArray<dtype>(*a * alpha + beta);
-            } else {
-                throw std::runtime_error("ScalarAffineFunction: type mismatch between input and scalar");
-            }
+            using T = typename std::decay_t<decltype(*a)>::value_type;
+            if constexpr (std::is_same_v<T, dtype>) return new NDArray<dtype>(*a * alpha_ + beta_);
+            else throw std::runtime_error("ScalarAffineFunction: type mismatch");
         }, inputs[0]);
     }
 
-    std::vector<arr::NDArrayUniquePtrVariant> backward(const arr::NDArrayPtrVariant &grad_output,
-                                                       const std::vector<arr::NDArrayPtrVariant>&) const override {
+    std::vector<arr::NDArrayUniquePtrVariant> backward(
+            const arr::NDArrayPtrVariant& gradOut,
+            const std::vector<arr::NDArrayPtrVariant>&) const override {
         std::vector<arr::NDArrayUniquePtrVariant> grads;
-        std::visit([&](auto grad) {
-            using dtype_g = typename std::decay_t<decltype(*grad)>::value_type;
-            if constexpr (std::is_same_v<dtype_g, dtype>) {
-                grads.push_back(std::make_unique<NDArray<dtype>>(*grad * alpha));
-            }
-        }, grad_output);
+        std::visit([&](auto g) {
+            using T = typename std::decay_t<decltype(*g)>::value_type;
+            if constexpr (std::is_same_v<T, dtype>)
+                grads.push_back(std::make_unique<NDArray<dtype>>(*g * alpha_));
+        }, gradOut);
         return grads;
     }
 };
 
 template <typename dtype>
 class ScalarRDivFunction : public Function {
-    dtype scalar;
+    dtype scalar_;
 public:
-    explicit ScalarRDivFunction(dtype scalar) : scalar(scalar) {}
+    explicit ScalarRDivFunction(dtype scalar) : scalar_(scalar) {}
 
     arr::NDArrayPtrVariant forward(const std::vector<arr::NDArrayPtrVariant>& inputs) const override {
         if (inputs.size() != 1)
             throw std::runtime_error("ScalarRDivFunction requires exactly 1 input");
         return std::visit([&](auto a) -> arr::NDArrayPtrVariant {
-            using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-            if constexpr (std::is_same_v<dtype_a, dtype>) {
-                return new NDArray<dtype>(scalar / *a);
-            } else {
-                throw std::runtime_error("ScalarRDivFunction: type mismatch between input and scalar");
-            }
+            using T = typename std::decay_t<decltype(*a)>::value_type;
+            if constexpr (std::is_same_v<T, dtype>) return new NDArray<dtype>(scalar_ / *a);
+            else throw std::runtime_error("ScalarRDivFunction: type mismatch");
         }, inputs[0]);
     }
 
-    std::vector<arr::NDArrayUniquePtrVariant> backward(const arr::NDArrayPtrVariant &grad_output,
-                                                       const std::vector<arr::NDArrayPtrVariant> &parent_data) const override {
-        if (parent_data.size() != 1)
-            throw std::runtime_error("ScalarRDivFunction backward requires exactly 1 parent tensor");
-        return std::visit([&](auto grad) -> std::vector<arr::NDArrayUniquePtrVariant> {
-            using dtype_g = typename std::decay_t<decltype(*grad)>::value_type;
+    std::vector<arr::NDArrayUniquePtrVariant> backward(
+            const arr::NDArrayPtrVariant& gradOut,
+            const std::vector<arr::NDArrayPtrVariant>& parentData) const override {
+        if (parentData.size() != 1)
+            throw std::runtime_error("ScalarRDivFunction backward requires 1 parent");
+        return std::visit([&](auto g) -> std::vector<arr::NDArrayUniquePtrVariant> {
+            using Tg = typename std::decay_t<decltype(*g)>::value_type;
             std::vector<arr::NDArrayUniquePtrVariant> grads;
             std::visit([&](auto a) {
-                using dtype_a = typename std::decay_t<decltype(*a)>::value_type;
-                if constexpr (std::is_same_v<dtype_a, dtype_g> && std::is_same_v<dtype_a, dtype>) {
-                    if (a) grads.push_back(std::make_unique<NDArray<dtype>>(-*grad * scalar / (*a * *a)));
-                    else grads.push_back(std::make_unique<NDArray<dtype>>(grad->zeros_like()));
+                using Ta = typename std::decay_t<decltype(*a)>::value_type;
+                if constexpr (std::is_same_v<Ta, Tg> && std::is_same_v<Ta, dtype>) {
+                    if (a) grads.push_back(std::make_unique<NDArray<dtype>>(-*g * scalar_ / (*a * *a)));
+                    else grads.push_back(std::make_unique<NDArray<dtype>>(g->zeros_like()));
                 }
-            }, parent_data[0]);
+            }, parentData[0]);
             return grads;
-        }, grad_output);
+        }, gradOut);
     }
 };
 
-// Factory functions for creating operations
 namespace functions {
     inline std::shared_ptr<Function> add() { return std::make_shared<AddFunction>(); }
     inline std::shared_ptr<Function> sub() { return std::make_shared<SubFunction>(); }
     inline std::shared_ptr<Function> mul() { return std::make_shared<MulFunction>(); }
     inline std::shared_ptr<Function> div() { return std::make_shared<DivFunction>(); }
+
     template <typename dtype>
-    inline std::shared_ptr<Function> affine(dtype alpha, dtype beta) {
+    std::shared_ptr<Function> affine(dtype alpha, dtype beta) {
         return std::make_shared<ScalarAffineFunction<dtype>>(alpha, beta);
     }
+
     template <typename dtype>
-    inline std::shared_ptr<Function> rdiv(dtype scalar) {
+    std::shared_ptr<Function> rdiv(dtype scalar) {
         return std::make_shared<ScalarRDivFunction<dtype>>(scalar);
     }
 }
 
+// Tensor-Tensor operators
 template <typename dtype>
-inline Tensor<dtype> operator+(const Tensor<dtype> &a, const Tensor<dtype> &b) {
+Tensor<dtype> operator+(const Tensor<dtype>& a, const Tensor<dtype>& b) {
     auto fn = functions::add();
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator-(const Tensor<dtype> &a, const Tensor<dtype> &b) {
+Tensor<dtype> operator-(const Tensor<dtype>& a, const Tensor<dtype>& b) {
     auto fn = functions::sub();
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator*(const Tensor<dtype> &a, const Tensor<dtype> &b) {
+Tensor<dtype> operator*(const Tensor<dtype>& a, const Tensor<dtype>& b) {
     auto fn = functions::mul();
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator/(const Tensor<dtype> &a, const Tensor<dtype> &b) {
+Tensor<dtype> operator/(const Tensor<dtype>& a, const Tensor<dtype>& b) {
     auto fn = functions::div();
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
+
+// Unary negation
 template <typename dtype>
-inline Tensor<dtype> operator-(const Tensor<dtype> &a) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(-1), static_cast<dtype>(0));
+Tensor<dtype> operator-(const Tensor<dtype>& a) {
+    auto fn = functions::affine<dtype>(dtype(-1), dtype(0));
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
+
+// Tensor-scalar operators
 template <typename dtype>
-inline Tensor<dtype> operator+(const Tensor<dtype> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(1), value);
+Tensor<dtype> operator+(const Tensor<dtype>& a, dtype v) {
+    auto fn = functions::affine<dtype>(dtype(1), v);
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator+(const dtype &value, const Tensor<dtype> &a) {
-    return a + value;
-}
+Tensor<dtype> operator+(dtype v, const Tensor<dtype>& a) { return a + v; }
+
 template <typename dtype>
-inline Tensor<dtype> operator-(const Tensor<dtype> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(1), static_cast<dtype>(-value));
+Tensor<dtype> operator-(const Tensor<dtype>& a, dtype v) {
+    auto fn = functions::affine<dtype>(dtype(1), -v);
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator-(const dtype &value, const Tensor<dtype> &a) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(-1), value);
+Tensor<dtype> operator-(dtype v, const Tensor<dtype>& a) {
+    auto fn = functions::affine<dtype>(dtype(-1), v);
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator*(const Tensor<dtype> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(value, static_cast<dtype>(0));
+Tensor<dtype> operator*(const Tensor<dtype>& a, dtype v) {
+    auto fn = functions::affine<dtype>(v, dtype(0));
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator*(const dtype &value, const Tensor<dtype> &a) {
-    return a * value;
-}
+Tensor<dtype> operator*(dtype v, const Tensor<dtype>& a) { return a * v; }
+
 template <typename dtype>
-inline Tensor<dtype> operator/(const Tensor<dtype> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(1) / value, static_cast<dtype>(0));
+Tensor<dtype> operator/(const Tensor<dtype>& a, dtype v) {
+    auto fn = functions::affine<dtype>(dtype(1) / v, dtype(0));
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
+
 template <typename dtype>
-inline Tensor<dtype> operator/(const dtype &value, const Tensor<dtype> &a) {
-    auto fn = functions::rdiv<dtype>(value);
+Tensor<dtype> operator/(dtype v, const Tensor<dtype>& a) {
+    auto fn = functions::rdiv<dtype>(v);
     return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 

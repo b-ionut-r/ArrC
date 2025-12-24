@@ -145,8 +145,8 @@ int main() {
 
             // Backward pass
             z.backward();
-            cout << "dz/dx = " << *(x.getGrad()) << " (ar trebui 4)\n";
-            cout << "dz/dy = " << *(y.getGrad()) << " (ar trebui 3)\n";
+            cout << "dz/dx = " << *(x.grad()) << " (ar trebui 4)\n";
+            cout << "dz/dy = " << *(y.grad()) << " (ar trebui 3)\n";
 
             // No global registry - Functions are owned by Tensors
 
@@ -160,7 +160,7 @@ int main() {
 
             // Cream un tensor pentru parametri (handle-style API)
             Tensor<float> w = tensor::ones<float>({2, 2}, true);
-            *w.getGradPtr() = 0.1f;
+            *w.grad() = 0.1f;
 
             vector<tensor::TensorSharedVariant> params = {w.shared()};
 
@@ -175,7 +175,7 @@ int main() {
             cout << "Apelam step() prin base class pointer:\n";
             for (Optimizer* o : optimizers) {
                 o->zeroGrad();
-                *w.getGradPtr() = 0.1f;
+                *w.grad() = 0.1f;
                 optimizeStep(o);  // UPCAST
                 cout << endl;
             }
@@ -189,7 +189,7 @@ int main() {
             // Virtual destructor demo
             cout << "\nVirtual destructor test:\n";
             Tensor<float> tmp = tensor::ones<float>({1}, true);
-            *tmp.getGradPtr() = 0.1f;
+            *tmp.grad() = 0.1f;
             vector<tensor::TensorSharedVariant> tmp_params = {tmp.shared()};
 
             Optimizer* ptr = new Adam(tmp_params, 0.001f, 0.0f, 0.9f, 0.999f);

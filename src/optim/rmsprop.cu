@@ -21,7 +21,7 @@ RMSProp::RMSProp(const std::vector<tensor::TensorSharedVariant> &params, const f
         for (const auto &param: params) {
             std::visit([&](auto param_shared) {
                 using param_dtype = typename std::decay_t<decltype(*param_shared)>::value_type;
-                auto mom = new NDArray<param_dtype>(param_shared->getShape());
+                auto mom = new NDArray<param_dtype>(param_shared->shape());
                 mom->executeElementWise(SetConstantOp<param_dtype>{static_cast<param_dtype>(0)}, nullptr, mom);
                 momentum.push_back(mom);
             }, param);
@@ -52,13 +52,13 @@ void RMSProp::step() {
 
                 if constexpr (std::is_same_v<param_dtype, mom_dtype>) {
                     if (auto param = weak_param.lock()) {
-                        if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
+                        if (param->requiresGrad() && param->grad() != nullptr) {
                             int NThreads = 256;
-                            int NBlocks = getNBlocks(param->getSize(), NThreads);
+                            int NBlocks = getNBlocks(param->size(), NThreads);
                             fusedRMSPropKernel<dtype, param_dtype, param_dtype, param_dtype><<<NBlocks, NThreads>>>(
-                                param->getSize(),
-                                param->getDataPtr()->getData(),
-                                param->getGradPtr()->getData(),
+                                param->size(),
+                                param->data()->getData(),
+                                param->grad()->getData(),
                                 mom->getData(),
                                 lr,
                                 weightDecay,

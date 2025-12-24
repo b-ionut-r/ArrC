@@ -22,7 +22,7 @@ Adam::Adam(const std::vector<tensor::TensorSharedVariant> &params, const float &
         for (const auto &param : params) {
             std::visit([&](auto param_shared) {
                 using dtype = typename std::decay_t<decltype(*param_shared)>::value_type;
-                auto mom = new NDArray<dtype>(param_shared->getShape());
+                auto mom = new NDArray<dtype>(param_shared->shape());
                 mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
                 firstMomentum.push_back(mom);
             }, param);
@@ -30,7 +30,7 @@ Adam::Adam(const std::vector<tensor::TensorSharedVariant> &params, const float &
         for (const auto &param : params) {
             std::visit([&](auto param_shared) {
                 using dtype = typename std::decay_t<decltype(*param_shared)>::value_type;
-                auto mom = new NDArray<dtype>(param_shared->getShape());
+                auto mom = new NDArray<dtype>(param_shared->shape());
                 mom->executeElementWise(SetConstantOp<dtype>{static_cast<dtype>(0)}, nullptr, mom);
                 secondMomentum.push_back(mom);
             }, param);
@@ -72,14 +72,14 @@ void Adam::step() {
                 if constexpr (std::is_same_v<param_dtype, m1_dtype> &&
                               std::is_same_v<param_dtype, m2_dtype>) {
                     if (auto param = weak_param.lock()) {
-                        if (param->getRequiresGrad() && param->getGradPtr() != nullptr) {
+                        if (param->requiresGrad() && param->grad() != nullptr) {
                             int NThreads = 256;
-                            int NBlocks = getNBlocks(param->getSize(), NThreads);
+                            int NBlocks = getNBlocks(param->size(), NThreads);
 
                             fusedAdamKernel<dtype, param_dtype, param_dtype, param_dtype><<<NBlocks, NThreads>>>(
-                                param->getSize(),
-                                param->getDataPtr()->getData(),
-                                param->getGradPtr()->getData(),
+                                param->size(),
+                                param->data()->getData(),
+                                param->grad()->getData(),
                                 m1->getData(),
                                 m2->getData(),
                                 lr,
