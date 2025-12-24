@@ -85,6 +85,18 @@ public:
     template <typename Op>
     NDArray<dtype> executeElementWise(Op op, const NDArray *other = nullptr,
                                       NDArray *final = nullptr) const;
+
+    // Helper methods for executeElementWise
+    template <typename Op>
+    void executeContiguousKernel(Op op, NDArray<dtype>* result,
+                                const NDArray<dtype>* first,
+                                const NDArray<dtype>* second) const;
+
+    template <typename Op>
+    void executeStridedKernel(Op op, NDArray<dtype>* result,
+                             const NDArray<dtype>* first,
+                             const NDArray<dtype>* second) const;
+
     dtype& operator[](const std::vector<int>& idx);
     NDArray operator[](vector<Slice> slices);
     NDArray& operator=(const dtype &value);
@@ -314,6 +326,150 @@ NDArray<dtype> NDArray<dtype>::operator[](vector<Slice> slices) {
 
 
 
+// RAII helper for managing broadcasted arrays and result allocation
+template <typename dtype>
+struct BroadcastedArrays {
+    const NDArray<dtype>* first;
+    const NDArray<dtype>* second;
+    NDArray<dtype>* result;
+
+private:
+    bool ownsFirst;
+    bool ownsSecond;
+    bool ownsResult;
+
+public:
+    BroadcastedArrays(const NDArray<dtype>* a, const NDArray<dtype>* b, NDArray<dtype>* output)
+        : first(nullptr), second(nullptr), result(nullptr),
+          ownsFirst(false), ownsSecond(false), ownsResult(false) {
+
+        // Handle unary operation or in-place execution
+        if (b == nullptr || output != nullptr) {
+            first = a;
+            second = b;
+            result = output ? output : new NDArray<dtype>(a->getShape());
+            ownsResult = (output == nullptr);
+            return;
+        }
+
+        // Handle binary operation with broadcasting
+        auto info = getBroadcastInfo(*a, *b);
+        first = createBroadcastedView(a, info.aBroadcastAxes, info.finalShape, ownsFirst);
+        second = createBroadcastedView(b, info.bBroadcastAxes, info.finalShape, ownsSecond);
+        result = new NDArray<dtype>(info.finalShape);
+        ownsResult = true;
+    }
+
+    ~BroadcastedArrays() {
+        if (ownsFirst) delete first;
+        if (ownsSecond) delete second;
+        if (ownsResult) delete result;
+    }
+
+    // Move result ownership to caller
+    NDArray<dtype> extractResult() {
+        if (ownsResult) {
+            NDArray<dtype> retVal = std::move(*result);
+            delete result;
+            result = nullptr;
+            ownsResult = false;
+            return retVal;
+        }
+        return *result;
+    }
+
+private:
+    static const NDArray<dtype>* createBroadcastedView(
+        const NDArray<dtype>* array,
+        const vector<int>& broadcastAxes,
+        const vector<int>& finalShape,
+        bool& ownsView) {
+
+        if (broadcastAxes.empty()) {
+            ownsView = false;
+            return array;
+        }
+
+        vector<int> newStrides = array->getStrides();
+        for (int axis : broadcastAxes) {
+            newStrides[axis] = 0;
+        }
+
+        ownsView = true;
+        return new NDArray<dtype>(array->getData(), finalShape, array->getOffset(), newStrides);
+    }
+};
+
+// Helper: RAII wrapper for device metadata
+template <typename dtype>
+struct DeviceMetadata {
+    int* resultShape;
+    int* resultStrides;
+    int* firstStrides;
+    int* secondStrides;
+
+    DeviceMetadata() : resultShape(nullptr), resultStrides(nullptr),
+                       firstStrides(nullptr), secondStrides(nullptr) {}
+
+    ~DeviceMetadata() {
+        if (resultShape) cudaFree(resultShape);
+        if (resultStrides) cudaFree(resultStrides);
+        if (firstStrides) cudaFree(firstStrides);
+        if (secondStrides) cudaFree(secondStrides);
+    }
+
+    // Delete copy operations to ensure single ownership
+    DeviceMetadata(const DeviceMetadata&) = delete;
+    DeviceMetadata& operator=(const DeviceMetadata&) = delete;
+};
+
+template <typename dtype>
+template <typename Op>
+void NDArray<dtype>::executeContiguousKernel(
+    Op op,
+    NDArray<dtype>* result,
+    const NDArray<dtype>* first,
+    const NDArray<dtype>* second) const {
+
+    elementWiseKernelContiguous<<<N_BLOCKS, N_THREADS>>>(
+        result->data, result->offset, result->size,
+        op,
+        first->data, first->offset,
+        second ? second->data : nullptr, second ? second->offset : 0
+    );
+    cudaDeviceSynchronize();
+}
+
+template <typename dtype>
+template <typename Op>
+void NDArray<dtype>::executeStridedKernel(
+    Op op,
+    NDArray<dtype>* result,
+    const NDArray<dtype>* first,
+    const NDArray<dtype>* second) const {
+
+    DeviceMetadata<dtype> deviceMem;
+
+    result->allocateDeviceMetadata(&deviceMem.resultStrides, &deviceMem.resultShape);
+    first->allocateDeviceMetadata(&deviceMem.firstStrides, nullptr);
+    if (second) {
+        second->allocateDeviceMetadata(&deviceMem.secondStrides, nullptr);
+    }
+
+    elementWiseKernelStrided<<<N_BLOCKS, N_THREADS>>>(
+        result->data, result->offset, deviceMem.resultStrides,
+        result->size, result->ndim, deviceMem.resultShape,
+        op,
+        first->data, first->offset, deviceMem.firstStrides,
+        second ? second->data : nullptr,
+        second ? second->offset : 0,
+        deviceMem.secondStrides
+    );
+    cudaDeviceSynchronize();
+
+    // deviceMem destructor automatically cleans up GPU memory
+}
+
 template <typename dtype>
 template <typename Op>
 NDArray<dtype> NDArray<dtype>::executeElementWise(
@@ -321,104 +477,28 @@ NDArray<dtype> NDArray<dtype>::executeElementWise(
     const NDArray<dtype> *other,
     NDArray<dtype> *final) const
 {
-    /* first, second result */
-    bool allContig = this->isContiguous() && (other ? other->isContiguous() : true);
-    /// HANDLE BROADCASTING
-    NDArray<dtype> *result = nullptr;
-    const NDArray<dtype> *first = nullptr;
-    const NDArray<dtype> *second = nullptr;
-    bool delFirst = false, delSecond = false, delResult = false;
-    if (other == nullptr || final != nullptr) {
-        first = this;
-        second = other;
-        result = final? final: new NDArray<dtype>(first->shape);
-        if(final == nullptr) delResult = true;
+    // Set up broadcasted arrays with automatic cleanup
+    BroadcastedArrays<dtype> arrays(this, other, final);
+
+    // Determine if we can use the faster contiguous kernel
+    bool allContiguous = this->isContiguous() &&
+                        (other ? other->isContiguous() : true);
+
+    // Execute the appropriate kernel
+    if (allContiguous) {
+        executeContiguousKernel(op, arrays.result, arrays.first, arrays.second);
     } else {
-        auto info = getBroadcastInfo(*this, *other);
-        if (info.aBroadcastAxes.empty()) first = this;
-        else {
-            vector<int> newStrides = this -> strides;
-            for (int i = 0; i < info.aBroadcastAxes.size(); i++) {
-                newStrides[info.aBroadcastAxes[i]] = 0;
-            }
-            first = new NDArray<dtype>(this->data, info.finalShape, this->offset, newStrides);
-            delFirst = true;
-        }
-        if (info.bBroadcastAxes.empty()) second = other;
-        else{
-            vector<int> newStrides = other -> strides;
-            for (int i = 0; i < info.bBroadcastAxes.size(); i++) {
-                newStrides[info.bBroadcastAxes[i]] = 0;
-            }
-            second = new NDArray<dtype>(other->data, info.finalShape, other->offset, newStrides);
-            delSecond = true;
-        }
-        result = new NDArray<dtype>(info.finalShape);
-        delResult = true;
-    }
-    cudaError_t err = cudaSuccess;
-
-    try {
-        if (allContig) {
-            elementWiseKernelContiguous<<<N_BLOCKS, N_THREADS>>>(
-                result->data, result->offset, result->size,
-                op,
-                first->data, first->offset,
-                second ? second->data : nullptr, second ? second->offset : 0
-            );
-            cudaDeviceSynchronize();
-        } else {
-            int *dResultShape = nullptr;
-            int *dResultStrides = nullptr, *dFirstStrides = nullptr, *dSecondStrides = nullptr;
-
-            try {
-                result->allocateDeviceMetadata(&dResultStrides, &dResultShape);
-                first->allocateDeviceMetadata(&dFirstStrides, nullptr);
-                if (second) second->allocateDeviceMetadata(&dSecondStrides, nullptr);
-
-                elementWiseKernelStrided<<<N_BLOCKS, N_THREADS>>>(
-                    result->data, result->offset, dResultStrides,
-                    result->size, result->ndim, dResultShape,
-                    op,
-                    first->data, first->offset, dFirstStrides,
-                    second ? second->data : nullptr, second ? second->offset : 0, dSecondStrides
-                );
-                cudaDeviceSynchronize();
-            } catch (...) {
-                // Clean up device memory on exception
-                if (dResultShape) cudaFree(dResultShape);
-                if (dResultStrides) cudaFree(dResultStrides);
-                if (dFirstStrides) cudaFree(dFirstStrides);
-                if (dSecondStrides) cudaFree(dSecondStrides);
-                throw;
-            }
-
-            cudaFreeMulti({dResultShape, dResultStrides, dFirstStrides});
-            if (second) cudaFree(dSecondStrides);
-        }
-
-        err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            throw CudaKernelException(cudaGetErrorString(err));
-        }
-    } catch (...) {
-        // Clean up temporary objects on any exception
-        if (delFirst) delete first;
-        if (delSecond) delete second;
-        if (delResult) delete result;
-        throw;
+        executeStridedKernel(op, arrays.result, arrays.first, arrays.second);
     }
 
-    // Normal cleanup
-    if (delFirst) delete first;
-    if (delSecond) delete second;
-    if (delResult) {
-        NDArray retVal = std::move(*result);
-        delete result;
-        return retVal;
-    } else {
-        return *result;
+    // Check for kernel errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw CudaKernelException(cudaGetErrorString(err));
     }
+
+    // Return result (moves ownership if applicable)
+    return arrays.extractResult();
 }
 
 
