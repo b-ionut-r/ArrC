@@ -252,165 +252,67 @@ namespace functions {
 }
 
 template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator+(const std::shared_ptr<TensorPtr<dtype>> &a,
-                                                   const std::shared_ptr<TensorPtr<dtype>> &b) {
-    auto fn = functions::add(); return fn->operator()<TensorPtr<dtype>>({a, b}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator-(const std::shared_ptr<TensorPtr<dtype>> &a,
-                                                   const std::shared_ptr<TensorPtr<dtype>> &b) {
-    auto fn = functions::sub(); return fn->operator()<TensorPtr<dtype>>({a, b}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator*(const std::shared_ptr<TensorPtr<dtype>> &a,
-                                                   const std::shared_ptr<TensorPtr<dtype>> &b) {
-    auto fn = functions::mul(); return fn->operator()<TensorPtr<dtype>>({a, b}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator/(const std::shared_ptr<TensorPtr<dtype>> &a,
-                                                   const std::shared_ptr<TensorPtr<dtype>> &b) {
-    auto fn = functions::div(); return fn->operator()<TensorPtr<dtype>>({a, b}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator-(const std::shared_ptr<TensorPtr<dtype>> &a) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(-1), static_cast<dtype>(0));
-    return fn->operator()<TensorPtr<dtype>>({a}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator+(const std::shared_ptr<TensorPtr<dtype>> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(1), value); return fn->operator()<TensorPtr<dtype>>({a}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator+(const dtype &value, const std::shared_ptr<TensorPtr<dtype>> &a) {
-    return a + value;
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator-(const std::shared_ptr<TensorPtr<dtype>> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(1), static_cast<dtype>(-value));
-    return fn->operator()<TensorPtr<dtype>>({a}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator-(const dtype &value, const std::shared_ptr<TensorPtr<dtype>> &a) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(-1), value); return fn->operator()<TensorPtr<dtype>>({a}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator*(const std::shared_ptr<TensorPtr<dtype>> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(value, static_cast<dtype>(0)); return fn->operator()<TensorPtr<dtype>>({a}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator*(const dtype &value, const std::shared_ptr<TensorPtr<dtype>> &a) {
-    return a * value;
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator/(const std::shared_ptr<TensorPtr<dtype>> &a, const dtype &value) {
-    auto fn = functions::affine<dtype>(static_cast<dtype>(1) / value, static_cast<dtype>(0));
-    return fn->operator()<TensorPtr<dtype>>({a}, fn);
-}
-template <typename dtype>
-inline std::shared_ptr<TensorPtr<dtype>> operator/(const dtype &value, const std::shared_ptr<TensorPtr<dtype>> &a) {
-    auto fn = functions::rdiv<dtype>(value); return fn->operator()<TensorPtr<dtype>>({a}, fn);
-}
-
-template <typename dtype>
 inline Tensor<dtype> operator+(const Tensor<dtype> &a, const Tensor<dtype> &b) {
-    return Tensor<dtype>(a.shared() + b.shared());
+    auto fn = functions::add();
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator-(const Tensor<dtype> &a, const Tensor<dtype> &b) {
-    return Tensor<dtype>(a.shared() - b.shared());
+    auto fn = functions::sub();
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator*(const Tensor<dtype> &a, const Tensor<dtype> &b) {
-    return Tensor<dtype>(a.shared() * b.shared());
+    auto fn = functions::mul();
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator/(const Tensor<dtype> &a, const Tensor<dtype> &b) {
-    return Tensor<dtype>(a.shared() / b.shared());
+    auto fn = functions::div();
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared(), b.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator-(const Tensor<dtype> &a) {
-    return Tensor<dtype>(-a.shared());
+    auto fn = functions::affine<dtype>(static_cast<dtype>(-1), static_cast<dtype>(0));
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator+(const Tensor<dtype> &a, const dtype &value) {
-    return Tensor<dtype>(a.shared() + value);
+    auto fn = functions::affine<dtype>(static_cast<dtype>(1), value);
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator+(const dtype &value, const Tensor<dtype> &a) {
-    return Tensor<dtype>(value + a.shared());
+    return a + value;
 }
 template <typename dtype>
 inline Tensor<dtype> operator-(const Tensor<dtype> &a, const dtype &value) {
-    return Tensor<dtype>(a.shared() - value);
+    auto fn = functions::affine<dtype>(static_cast<dtype>(1), static_cast<dtype>(-value));
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator-(const dtype &value, const Tensor<dtype> &a) {
-    return Tensor<dtype>(value - a.shared());
+    auto fn = functions::affine<dtype>(static_cast<dtype>(-1), value);
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator*(const Tensor<dtype> &a, const dtype &value) {
-    return Tensor<dtype>(a.shared() * value);
+    auto fn = functions::affine<dtype>(value, static_cast<dtype>(0));
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator*(const dtype &value, const Tensor<dtype> &a) {
-    return Tensor<dtype>(value * a.shared());
+    return a * value;
 }
 template <typename dtype>
 inline Tensor<dtype> operator/(const Tensor<dtype> &a, const dtype &value) {
-    return Tensor<dtype>(a.shared() / value);
+    auto fn = functions::affine<dtype>(static_cast<dtype>(1) / value, static_cast<dtype>(0));
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 template <typename dtype>
 inline Tensor<dtype> operator/(const dtype &value, const Tensor<dtype> &a) {
-    return Tensor<dtype>(value / a.shared());
-}
-
-template <typename dtype>
-inline TensorPtr<dtype> operator+(const TensorPtr<dtype> &a, const TensorPtr<dtype> &b) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() + *b.getDataPtr()), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator-(const TensorPtr<dtype> &a, const TensorPtr<dtype> &b) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() - *b.getDataPtr()), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator*(const TensorPtr<dtype> &a, const TensorPtr<dtype> &b) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() * *b.getDataPtr()), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator/(const TensorPtr<dtype> &a, const TensorPtr<dtype> &b) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() / *b.getDataPtr()), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator-(const TensorPtr<dtype> &a) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(-*a.getDataPtr()), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator+(const TensorPtr<dtype> &a, const dtype &value) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() + value), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator+(const dtype &value, const TensorPtr<dtype> &a) { return a + value; }
-template <typename dtype>
-inline TensorPtr<dtype> operator-(const TensorPtr<dtype> &a, const dtype &value) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() - value), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator-(const dtype &value, const TensorPtr<dtype> &a) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(value - *a.getDataPtr()), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator*(const TensorPtr<dtype> &a, const dtype &value) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() * value), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator*(const dtype &value, const TensorPtr<dtype> &a) { return a * value; }
-template <typename dtype>
-inline TensorPtr<dtype> operator/(const TensorPtr<dtype> &a, const dtype &value) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(*a.getDataPtr() / value), false);
-}
-template <typename dtype>
-inline TensorPtr<dtype> operator/(const dtype &value, const TensorPtr<dtype> &a) {
-    return TensorPtr<dtype>(std::make_unique<NDArray<dtype>>(value / *a.getDataPtr()), false);
+    auto fn = functions::rdiv<dtype>(value);
+    return Tensor<dtype>(fn->operator()<TensorPtr<dtype>>({a.shared()}, fn));
 }
 
 #endif //ARRC_ARITHMETIC_H

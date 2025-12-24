@@ -7,7 +7,6 @@
 
 #include "ndarray.cuh"
 #include <string>
-#include <span>
 #include <unordered_set>
 #include <algorithm>
 #include <memory>
@@ -46,14 +45,33 @@ public:
     }
     TensorPtr(const std::vector<int> &shape, const bool &requiresGrad = false):
     TensorPtr(std::make_unique<NDArray<dtype>>(shape), requiresGrad) {}
-    // Legacy constructor taking raw pointer (wraps in unique_ptr)
-    TensorPtr(NDArray<dtype> *data, const bool &requiresGrad = false, std::shared_ptr<Function> gradFn = nullptr):
-    TensorPtr(std::unique_ptr<NDArray<dtype>>(data), requiresGrad, std::move(gradFn)) {}
+    
     TensorPtr(const TensorPtr&) = delete;
     TensorPtr& operator=(const TensorPtr&) = delete;
-    TensorPtr(TensorPtr&& other) noexcept;
-    TensorPtr& operator=(TensorPtr&& other) noexcept;
-    ~TensorPtr() = default;  // shared_ptr handles gradFn cleanup automatically
+
+    TensorPtr(TensorPtr&& other) noexcept
+        : id(other.id),
+          data(std::move(other.data)),
+          grad(std::move(other.grad)),
+          gradFn(std::move(other.gradFn)),
+          requiresGrad(other.requiresGrad) {
+        other.requiresGrad = false;
+    }
+
+    TensorPtr& operator=(TensorPtr&& other) noexcept {
+        if (this != &other) {
+            data = std::move(other.data);
+            grad = std::move(other.grad);
+            gradFn = std::move(other.gradFn);
+            requiresGrad = other.requiresGrad;
+            id = other.id;
+            other.requiresGrad = false;
+        }
+        return *this;
+    }
+
+    ~TensorPtr() = default;
+    
     NDArray<dtype>* getDataPtr() const {return data.get();}
     NDArray<dtype>* getGradPtr() const {return grad.get();}
     NDArray<dtype> getData() const {return *data;}
@@ -62,85 +80,61 @@ public:
     std::string getName() const {return "UnnamedTensor_" + std::to_string(id);}
     int getSize() const {return data->getSize();}
     vector<int> getShape() const {return data->getShape();}
+    
     void zeroGrad() {
         if (requiresGrad && grad) {
             *grad = (dtype)0;
         }
     }
-    // For internal use by cast() - replaces the gradient buffer
+    
     void replaceGrad(std::unique_ptr<NDArray<dtype>> newGrad) {
         grad = std::move(newGrad);
     }
+    
     void backward(NDArray<dtype> *grad = nullptr,
                   const bool retainGraph = false,
                   const int preserveAncestors = 4);
+                  
     template <typename newDtype>
     TensorPtr<newDtype> cast() const;
+
+private:
+    void build_topological_sort(TensorPtr<dtype> *tensor, std::vector<TensorPtr<dtype>*> &topoOrder,
+                                std::unordered_set<TensorPtr<dtype>*> &visited) {
+        if (tensor == nullptr || visited.count(tensor)) return;
+        visited.insert(tensor);
+        
+        if (tensor->gradFn != nullptr) {
+            for (const auto &parent_variant : tensor->gradFn->parent_tensors) {
+                std::visit([&](auto weak_parent) {
+                    using parent_tensor_t = typename std::decay_t<decltype(weak_parent)>::element_type;
+                    using parent_dtype = typename parent_tensor_t::value_type;
+
+                    if constexpr (std::is_same_v<parent_dtype, dtype>) {
+                        if (auto parent = weak_parent.lock()) {
+                            if (parent->getRequiresGrad()) {
+                                build_topological_sort(parent.get(), topoOrder, visited);
+                            }
+                        }
+                    }
+                }, parent_variant);
+            }
+        }
+        topoOrder.push_back(tensor);
+    }
 };
 
 template <typename dtype>
 size_t TensorPtr<dtype>::idGenerator = 0;
 
 template <typename dtype>
-TensorPtr<dtype>::TensorPtr(TensorPtr&& other) noexcept
-    : id(other.id),
-      data(std::move(other.data)),
-      grad(std::move(other.grad)),
-      gradFn(std::move(other.gradFn)),
-      requiresGrad(other.requiresGrad) {
-    other.requiresGrad = false;
-}
-
-template <typename dtype>
-TensorPtr<dtype>& TensorPtr<dtype>::operator=(TensorPtr&& other) noexcept {
-    if (this != &other) {
-        // Transfer ownership - shared_ptr handles cleanup automatically
-        data = std::move(other.data);
-        grad = std::move(other.grad);
-        gradFn = std::move(other.gradFn);
-        requiresGrad = other.requiresGrad;
-        id = other.id;
-        other.requiresGrad = false;
-    }
-    return *this;
-}
-
-
-template <typename dtype>
-void buildTopo(TensorPtr<dtype> *tensor, std::vector<TensorPtr<dtype>*> &topoOrder,
-                std::unordered_set<TensorPtr<dtype>*> &visited) {
-    if (tensor == nullptr || visited.find(tensor) != visited.end()) {
-        return;
-    }
-    visited.insert(tensor);
-    if (tensor->gradFn != nullptr) {
-        for (const auto &parent_variant : tensor->gradFn->parent_tensors) {
-            std::visit([&](auto weak_parent) {
-                using parent_tensor = typename std::decay_t<decltype(weak_parent)>::element_type;
-                using parent_dtype = typename parent_tensor::value_type;
-
-                if constexpr (std::is_same_v<parent_dtype, dtype>) {
-                    // Lock the weak_ptr to get a shared_ptr
-                    if (auto parent = weak_parent.lock()) {
-                        if (parent->getRequiresGrad()) {
-                            buildTopo(parent.get(), topoOrder, visited);
-                        }
-                    }
-                }
-                // If lock() fails, parent was deleted - skip it
-            }, parent_variant);
-        }
-    }
-    topoOrder.push_back(tensor);
-}
-
-template <typename dtype>
 void TensorPtr<dtype>::backward(NDArray<dtype> *grad,
                              const bool retainGraph,
                              const int preserveAncestors) {
-    bool deleteGrad = false;
     if (!requiresGrad)
         throw std::runtime_error("Cannot do backprop for a tensor that does not require grad.");
+        
+    bool deleteGrad = false;
     if (grad == nullptr) {
         if (getSize() != 1) {
             throw std::runtime_error("backward() can only be called for scalar outputs. "
@@ -149,49 +143,40 @@ void TensorPtr<dtype>::backward(NDArray<dtype> *grad,
         grad = new NDArray<dtype>(arr::make_ones<dtype>(getShape()));
         deleteGrad = true;
     }
-    // Initialize this tensor's gradient
+
     if (!this->grad) {
         this->grad = std::make_unique<NDArray<dtype>>(this->getShape());
     }
     *(this->grad) = *grad;
 
-    // Build computational graph using topological sort
-    auto topoOrder = std::vector<TensorPtr<dtype>*>();
-    auto visited = std::unordered_set<TensorPtr<dtype>*>();
-    buildTopo(this, topoOrder, visited);
+    std::vector<TensorPtr<dtype>*> topoOrder;
+    std::unordered_set<TensorPtr<dtype>*> visited;
+    
+    // Start topological sort from this node
+    build_topological_sort(this, topoOrder, visited);
 
-    // Build set of nodes to preserve (the most recent N in topo order)
     std::unordered_set<TensorPtr<dtype>*> nodesToPreserve;
     size_t toPreserve = std::min(static_cast<size_t>(preserveAncestors), topoOrder.size());
     for (size_t i = topoOrder.size() - toPreserve; i < topoOrder.size(); i++) {
         nodesToPreserve.insert(topoOrder[i]);
     }
 
-    // Track functions to cleanup after backward pass completes
-    // With shared_ptr, we just need to reset the tensor's gradFn to release ownership
-
-
     for (auto it = topoOrder.rbegin(); it != topoOrder.rend(); ++it) {
         TensorPtr<dtype> *tensor = *it;
-        if (tensor->gradFn == nullptr) continue;
-
+        if (!tensor->gradFn) continue;
+        
         auto* gradOutput = tensor->grad.get();
-        if (gradOutput == nullptr) continue;
+        if (!gradOutput) continue;
 
-        // Lock weak_ptrs to get parent data safely
         std::vector<arr::NDArrayPtrVariant> current_parent_data;
+        // Collect parent data safely
         for (const auto &parent_variant : tensor->gradFn->parent_tensors) {
             std::visit([&](auto weak_parent) {
-                using weak_type = std::decay_t<decltype(weak_parent)>;
-                using shared_type = typename weak_type::element_type;
-                using value_type = typename shared_type::value_type;
-
-                // Lock the weak_ptr - if parent deleted, we get nullptr
+                using shared_type = typename std::decay_t<decltype(weak_parent)>::element_type;
                 if (auto parent = weak_parent.lock()) {
                     current_parent_data.push_back(parent->getDataPtr());
                 } else {
-                    // Parent was deleted, use typed null
-                    current_parent_data.push_back(static_cast<NDArray<value_type>*>(nullptr));
+                    current_parent_data.push_back(static_cast<NDArray<typename shared_type::value_type>*>(nullptr));
                 }
             }, parent_variant);
         }
@@ -201,7 +186,7 @@ void TensorPtr<dtype>::backward(NDArray<dtype> *grad,
         for (size_t i = 0; i < parentGrads.size() && i < tensor->gradFn->parent_tensors.size(); i++) {
             std::visit([&](auto weak_parent) {
                 if (auto parentTensor = weak_parent.lock()) {
-                    std::visit([&](auto& parentGradPtr) {  // reference to unique_ptr
+                    std::visit([&](auto& parentGradPtr) {
                         using parent_dtype = typename std::decay_t<decltype(*parentTensor)>::value_type;
                         using grad_dtype = typename std::decay_t<decltype(*parentGradPtr)>::value_type;
 
@@ -218,16 +203,11 @@ void TensorPtr<dtype>::backward(NDArray<dtype> *grad,
                         }
                     }, parentGrads[i]);
                 }
-                // If parent deleted, unique_ptr auto-cleans up - no manual delete needed
             }, tensor->gradFn->parent_tensors[i]);
         }
-        // Cleanup: release function ownership if not retaining graph
-        if (!retainGraph && tensor->gradFn != nullptr) {
-            bool isPreserved = nodesToPreserve.count(tensor) > 0;
-            if (!isPreserved) {
-                // Release ownership - shared_ptr handles deletion automatically
-                tensor->gradFn.reset();
-            }
+        
+        if (!retainGraph && tensor->gradFn != nullptr && !nodesToPreserve.count(tensor)) {
+            tensor->gradFn.reset();
         }
     }
     if (deleteGrad) delete grad;
@@ -321,18 +301,6 @@ namespace tensor {
         std::weak_ptr<TensorPtr<__half>>,
         std::weak_ptr<TensorPtr<__nv_bfloat16>>,
         std::weak_ptr<TensorPtr<bool>>
-    >;
-
-    // Legacy TensorPtrVariant (kept for backward compatibility during transition)
-    using TensorPtrVariant = std::variant<
-        TensorPtr<int32_t>*,
-        TensorPtr<int64_t>*,
-        TensorPtr<size_t>*,
-        TensorPtr<float>*,
-        TensorPtr<double>*,
-        TensorPtr<__half>*,
-        TensorPtr<__nv_bfloat16>*,
-        TensorPtr<bool>*
     >;
 
     // Helper function to create tensors with shared_ptr
